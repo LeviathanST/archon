@@ -5,6 +5,8 @@ import { createError, ErrorCode } from "../protocol/errors.js";
 import { db } from "../db/connection.js";
 import { agents } from "../db/schema.js";
 import { SessionManager } from "./session.js";
+import { discoverAgents } from "../registry/discovery.js";
+import { getAgentCard } from "../registry/agent-card.js";
 import { logger } from "../utils/logger.js";
 
 export class Router {
@@ -53,8 +55,11 @@ export class Router {
         break;
 
       case "directory.list":
-        // Placeholder — implemented in Milestone 2
-        this.sessions.send(agentId, { type: "directory.result", agents: [] });
+        await this.handleDirectoryList(agentId, message.filter);
+        break;
+
+      case "directory.get":
+        await this.handleDirectoryGet(agentId, message.agentId);
         break;
 
       default:
@@ -112,11 +117,14 @@ export class Router {
       .set({ status: "online", updatedAt: new Date() })
       .where(eq(agents.id, agentId));
 
+    // Generate fresh agent card on auth
+    const agentCard = await getAgentCard(agentId);
+
     // Send auth.ok
     socket.send(
       JSON.stringify({
         type: "auth.ok",
-        agentCard: agent.agentCard ?? {},
+        agentCard: agentCard ?? {},
         pendingInvites: [],
       })
     );
@@ -134,6 +142,36 @@ export class Router {
       .where(eq(agents.id, agentId));
 
     logger.info({ agentId, status }, "Agent status updated");
+  }
+
+  private async handleDirectoryList(
+    agentId: string,
+    filter?: { departmentId?: string }
+  ): Promise<void> {
+    const cards = await discoverAgents(agentId, filter);
+    this.sessions.send(agentId, {
+      type: "directory.result",
+      agents: cards,
+    });
+  }
+
+  private async handleDirectoryGet(
+    requestingAgentId: string,
+    targetAgentId: string
+  ): Promise<void> {
+    const card = await getAgentCard(targetAgentId);
+    if (!card) {
+      this.sessions.send(
+        requestingAgentId,
+        createError(ErrorCode.AGENT_NOT_FOUND, `Agent "${targetAgentId}" not found`)
+      );
+      return;
+    }
+
+    this.sessions.send(requestingAgentId, {
+      type: "directory.result",
+      agents: [card],
+    });
   }
 
   private getAgentIdForSocket(socket: WebSocket): string | undefined {

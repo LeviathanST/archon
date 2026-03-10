@@ -1,6 +1,6 @@
 # Milestone 2: Registry & Discovery
 
-> Status: **Not Started**
+> Status: **Complete**
 > Goal: Agents can discover each other via Agent Cards.
 
 ---
@@ -8,34 +8,39 @@
 ## Tasks
 
 ### Agent Workspaces
-- [ ] Create CEO agent workspace template in `agents/ceo/` (SOUL.md, IDENTITY.md, MEMORY.md, AGENTS.md)
-- [ ] Define default agent workspace template in `agents/templates/default/`
+- [x] Create CEO agent workspace in `agents/ceo/` (SOUL.md, IDENTITY.md, MEMORY.md, AGENTS.md)
+- [x] Define default agent workspace template in `agents/templates/default/`
 
 ### Database Seeding
-- [ ] `src/db/seed.ts` — CEO agent, sample departments (engineering, research, planning), roles
+- [x] `src/db/seed.ts` — CEO agent, departments, roles (done in Milestone 1)
 
 ### Registry
-- [ ] `src/registry/agent-card.ts` — Read SOUL.md + IDENTITY.md, merge with DB, produce AgentCard JSON
-  - Document A2A Agent Card inspiration in comments
-- [ ] `src/registry/agent-registry.ts` — CRUD for agents, departments, roles
-- [ ] `src/registry/discovery.ts` — Permission-filtered agent listing
+- [x] `src/registry/agent-card.ts` — Read SOUL.md + IDENTITY.md, merge with DB, produce AgentCard JSON
+  - A2A Agent Card inspiration documented in comments
+  - Parses markdown sections (strengths, weaknesses, skills, personality, communication style)
+  - Caches generated card in agents.agent_card JSONB column
+- [x] `src/registry/agent-registry.ts` — CRUD for agents, departments, roles, assignments
+- [x] `src/registry/discovery.ts` — Permission-filtered agent listing
+  - Admin (agent:* permission) sees all agents
+  - Non-admin sees self + agents in shared departments
+  - Supports departmentId filter
 
 ### Permissions
-- [ ] `src/hub/permissions.ts` — Permission checking against DB
+- [x] `src/hub/permissions.ts` — Permission checking with wildcard resource support
 
 ### Router
-- [ ] Add `directory.list` handler
-- [ ] Add `directory.get` handler
+- [x] `directory.list` handler — uses real discovery with permission filtering
+- [x] `directory.get` handler — lookup single agent by ID
+- [x] Auth now returns fresh agent card on login
+
+### Protocol
+- [x] Added `DirectoryGetMessage` to `InboundMessage` discriminated union
 
 ### Tests
-- [ ] Agent card generation tests
-- [ ] Discovery filtering tests
-- [ ] Registry CRUD tests
-
----
-
-## Notes
-_Add implementation notes, blockers, and discoveries here._
+- [x] Agent card generation tests (5 tests) — DB data, CEO workspace files, caching, live status
+- [x] Discovery filtering tests (5 tests) — admin view, department scoping, department filter
+- [x] Permissions tests (6 tests) — exact match, wildcard, grant, dedup
+- [x] All 26 tests passing
 
 ---
 
