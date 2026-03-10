@@ -16,7 +16,7 @@ The core philosophy: **each agent is a human, not a function.**
 ## 2. Architecture Overview
 
 ```
-~/.archon/                              /home/leviathanst/workspaces/vibe/archon/
+~/.archon/                              archon/
 (Runtime Data)                          (Platform Source Code)
 ├── config.toml                         ├── src/
 ├── agents/                             │   ├── index.ts
