@@ -31,6 +31,11 @@ export const DirectoryListMessage = z.object({
     .optional(),
 });
 
+export const DirectoryGetMessage = z.object({
+  type: z.literal("directory.get"),
+  agentId: z.string().min(1),
+});
+
 export const DirectoryResultMessage = z.object({
   type: z.literal("directory.result"),
   agents: z.array(z.record(z.unknown())),
@@ -53,6 +58,7 @@ export const PongMessage = z.object({ type: z.literal("pong") });
 export const InboundMessage = z.discriminatedUnion("type", [
   AuthMessage,
   DirectoryListMessage,
+  DirectoryGetMessage,
   AgentStatusMessage,
   PingMessage,
 ]);
@@ -63,6 +69,7 @@ export type AuthMessage = z.infer<typeof AuthMessage>;
 export type AuthOkMessage = z.infer<typeof AuthOkMessage>;
 export type AuthErrorMessage = z.infer<typeof AuthErrorMessage>;
 export type DirectoryListMessage = z.infer<typeof DirectoryListMessage>;
+export type DirectoryGetMessage = z.infer<typeof DirectoryGetMessage>;
 export type DirectoryResultMessage = z.infer<typeof DirectoryResultMessage>;
 export type AgentStatusMessage = z.infer<typeof AgentStatusMessage>;
 export type InboundMessage = z.infer<typeof InboundMessage>;
