@@ -1,6 +1,6 @@
 # Milestone 3: Meeting Room Core
 
-> Status: **Not Started**
+> Status: **Mostly Complete**
 > Goal: The meeting loop works end-to-end through all 4 phases.
 
 ---
@@ -8,15 +8,15 @@
 ## Tasks
 
 ### Message Types
-- [ ] `src/meeting/types.ts` — All meeting message Zod schemas
+- [x] `src/meeting/types.ts` — All meeting message Zod schemas
 
 ### Phase State Machine
-- [ ] `src/meeting/phases.ts` — PRESENT → DISCUSS → DECIDE → ASSIGN transitions
+- [x] `src/meeting/phases.ts` — PRESENT → DISCUSS → DECIDE → ASSIGN transitions
   - Transition triggers: budget exhaustion, all-pass, initiator advance
   - Cancel from any phase
 
 ### Meeting Room
-- [ ] `src/meeting/meeting-room.ts` — MeetingRoom class
+- [x] `src/meeting/meeting-room.ts` — MeetingRoom class
   - Create meeting record in Postgres
   - Manage participant list
   - Track current phase
@@ -24,22 +24,24 @@
   - Store all messages in `meeting_messages`
 
 ### Turn Management
-- [ ] `src/meeting/turn-manager.ts` — Relevance collection, 10s timeout, turn ordering
+- [x] `src/meeting/turn-manager.ts` — Relevance collection, 120s timeout, turn ordering
   - MUST_SPEAK first (by response time), then COULD_ADD
   - All PASS → auto-advance phase
+  - Timeout bumped from 10s to 120s for CLI agent providers (claude, gemini)
 
 ### Token Budget
-- [ ] `src/utils/token-counter.ts` — tiktoken wrapper
-- [ ] Budget enforcement: PRESENT 20%, DISCUSS 50%, DECIDE 20%, ASSIGN 10%
-- [ ] Auto-advance on budget exhaustion
+- [x] `src/meeting/token-counter.ts` — Simple token estimator (chars/4)
+  - Not tiktoken yet — using char-based approximation
+- [x] Budget enforcement: PRESENT 20%, DISCUSS 50%, DECIDE 20%, ASSIGN 10%
+- [x] Auto-advance on budget exhaustion
 
 ### Router
-- [ ] Add all `meeting.*` handlers to router
+- [x] Add all `meeting.*` handlers to router
 
 ### Persistence
 - [ ] Save decisions (DECIDE phase) to meetings.decisions JSONB
 - [ ] Save action items (ASSIGN phase) to meetings.action_items JSONB
-- [ ] Update meeting status on completion
+- [x] Update meeting status on completion
 
 ### Tests
 - [ ] Phase transition tests
@@ -50,7 +52,10 @@
 ---
 
 ## Notes
-_Add implementation notes, blockers, and discoveries here._
+- Token counter uses simple chars/4 estimation instead of tiktoken. Good enough for MVP, can upgrade later.
+- Relevance timeout was increased from 10s to 120s because CLI tools (claude --print, gemini -p) take 10-30s per call.
+- Meeting room is fully functional for end-to-end meetings, tested with 2 agents (Claude + Gemini).
+- Missing: persisting decisions/action_items to Postgres JSONB columns, and unit tests.
 
 ---
 

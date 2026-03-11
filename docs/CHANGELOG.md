@@ -4,6 +4,32 @@ All notable progress on Archon is logged here.
 
 ---
 
+## 2026-03-11
+
+### Milestone 4: Agent Client — In Progress
+- `scripts/agent.ts` — Multi-provider agent runner (cli-claude, cli-gemini, openai)
+  - Loads SOUL.md/IDENTITY.md for agent persona
+  - Handles full meeting lifecycle: invite → join → relevance → speak → vote → assign
+  - Claude provider uses `--print` + stdin (not `-p`) to avoid nested session hang
+  - Gemini provider uses `-p` flag directly
+  - OpenAI provider for OpenRouter/Ollama compatibility
+- `scripts/start-meeting.ts` — Meeting starter with auto-facilitation through all 4 phases
+- Seeded demo agents Alice and Bob in engineering department
+- Successful end-to-end meeting: Alice (Claude Haiku) + Bob (Gemini CLI) had 8-turn emergent discussion, reached consensus on priorities, self-assigned action items
+- Relevance-based turn management working (MUST_SPEAK / COULD_ADD / PASS)
+- Bumped relevance timeout from 10s to 120s for CLI agent latency
+
+### Milestone 3: Meeting Room Core — Mostly Complete
+- `src/meeting/types.ts` — Meeting message Zod schemas
+- `src/meeting/phases.ts` — Phase state machine (PRESENT → DISCUSS → DECIDE → ASSIGN)
+- `src/meeting/meeting-room.ts` — Full meeting room with participant tracking, phase transitions, budget enforcement
+- `src/meeting/turn-manager.ts` — Relevance collection, MUST_SPEAK-first ordering, all-PASS auto-advance
+- `src/meeting/token-counter.ts` — Simple token estimator (chars/4)
+- All `meeting.*` handlers wired in router
+- Remaining: meeting persistence (decisions/action_items to Postgres JSONB), unit tests
+
+---
+
 ## 2026-03-10
 
 ### Milestone 2: Registry & Discovery — Complete
