@@ -13,19 +13,20 @@
     "test": "vitest"
   },
   "dependencies": {
-    "ws": "^8.18.0",
     "drizzle-orm": "^0.39.0",
-    "postgres": "^3.4.5",
+    "nanoid": "^5.0.9",
+    "openai": "^6.27.0",
     "pino": "^9.6.0",
-    "zod": "^3.24.0",
-    "nanoid": "^5.0.9"
+    "postgres": "^3.4.5",
+    "ws": "^8.18.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
-    "tsx": "^4.19.0",
-    "drizzle-kit": "^0.30.0",
+    "@types/node": "^22.0.0",
     "@types/ws": "^8.5.0",
-    "vitest": "^3.0.0",
-    "@types/node": "^22.0.0"
+    "drizzle-kit": "^0.30.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   }
 }

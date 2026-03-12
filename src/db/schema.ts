@@ -114,9 +114,8 @@ export const meetings = pgTable(
     id: text("id").primaryKey(),
     projectId: text("project_id").references(() => projects.id),
     title: text("title").notNull(),
-    phase: text("phase", { enum: ["present", "discuss", "decide", "assign"] })
-      .notNull()
-      .default("present"),
+    phase: text("phase").notNull().default("present"),
+    methodology: text("methodology").notNull().default("general"),
     status: text("status", { enum: ["active", "completed", "cancelled"] })
       .notNull()
       .default("active"),
