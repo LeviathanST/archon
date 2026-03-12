@@ -11,6 +11,7 @@ import {
   MeetingAssignMessage,
   MeetingAcknowledgeMessage,
   MeetingApproveMessage,
+  MeetingCancelMessage,
 } from "../meeting/types.js";
 
 // --- Auth ---
@@ -200,6 +201,7 @@ export const InboundMessage = z.discriminatedUnion("type", [
   MeetingAssignMessage,
   MeetingAcknowledgeMessage,
   MeetingApproveMessage,
+  MeetingCancelMessage,
   // Meeting history
   MeetingHistoryMessage,
   MeetingTranscriptMessage,

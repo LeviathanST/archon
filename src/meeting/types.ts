@@ -86,6 +86,12 @@ export const MeetingApproveMessage = z.object({
   meetingId: z.string().min(1),
 });
 
+export const MeetingCancelMessage = z.object({
+  type: z.literal("meeting.cancel"),
+  meetingId: z.string().min(1),
+  reason: z.string().optional(),
+});
+
 // --- All inbound meeting message types ---
 
 export const MeetingInboundMessage = z.discriminatedUnion("type", [
@@ -100,6 +106,7 @@ export const MeetingInboundMessage = z.discriminatedUnion("type", [
   MeetingAssignMessage,
   MeetingAcknowledgeMessage,
   MeetingApproveMessage,
+  MeetingCancelMessage,
 ]);
 
 export type MeetingCreateMessage = z.infer<typeof MeetingCreateMessage>;
@@ -113,6 +120,7 @@ export type MeetingVoteMessage = z.infer<typeof MeetingVoteMessage>;
 export type MeetingAssignMessage = z.infer<typeof MeetingAssignMessage>;
 export type MeetingAcknowledgeMessage = z.infer<typeof MeetingAcknowledgeMessage>;
 export type MeetingApproveMessage = z.infer<typeof MeetingApproveMessage>;
+export type MeetingCancelMessage = z.infer<typeof MeetingCancelMessage>;
 export type MeetingInboundMessage = z.infer<typeof MeetingInboundMessage>;
 
 // --- Outbound meeting messages (hub → agent) ---

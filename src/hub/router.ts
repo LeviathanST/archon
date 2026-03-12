@@ -187,6 +187,10 @@ export class Router {
         await this.handleMeetingApprove(agentId, message.meetingId);
         break;
 
+      case "meeting.cancel":
+        await this.handleMeetingCancel(agentId, message.meetingId, message.reason);
+        break;
+
       // --- Meeting history ---
       case "meeting.history":
         await this.handleMeetingHistory(agentId, message);
@@ -246,10 +250,32 @@ export class Router {
 
     const agentCard = await getAgentCard(agentId);
 
-    // Find pending invites for this agent
+    // Find pending invites and active meetings for this agent
     const pendingInvites: string[] = [];
+    const activeMeetings: Array<{
+      meetingId: string;
+      title: string;
+      phase: string;
+      initiator: string;
+    }> = [];
+
     for (const [meetingId, room] of this.activeMeetings) {
-      if (room.getParticipants().includes(agentId) && !room.getJoined().includes(agentId)) {
+      if (!room.getParticipants().includes(agentId)) continue;
+
+      if (room.getJoined().includes(agentId)) {
+        // Already joined — this is a reconnect, re-add to joined set
+        activeMeetings.push({
+          meetingId,
+          title: room.title,
+          phase: room.getPhase(),
+          initiator: room.initiatorId,
+        });
+        // Update session to track current meeting
+        const session = this.sessions.get(agentId);
+        if (session && !session.currentMeetingId) {
+          session.currentMeetingId = meetingId;
+        }
+      } else {
         pendingInvites.push(meetingId);
       }
     }
@@ -259,10 +285,11 @@ export class Router {
         type: "auth.ok",
         agentCard: agentCard ?? {},
         pendingInvites,
+        activeMeetings,
       })
     );
 
-    logger.info({ agentId }, "Agent authenticated");
+    logger.info({ agentId, activeMeetings: activeMeetings.length, pendingInvites: pendingInvites.length }, "Agent authenticated");
   }
 
   // --- Directory ---
@@ -746,6 +773,19 @@ export class Router {
       type: "meeting.transcript.result",
       ...result,
     });
+  }
+
+  private async handleMeetingCancel(agentId: string, meetingId: string, reason?: string): Promise<void> {
+    const room = this.getMeetingOrError(agentId, meetingId);
+    if (!room) return;
+
+    // Only initiator can cancel
+    if (room.initiatorId !== agentId) {
+      this.sessions.send(agentId, createError(ErrorCode.PERMISSION_DENIED, "Only the meeting initiator can cancel"));
+      return;
+    }
+
+    await room.cancel(reason ?? "Cancelled by initiator");
   }
 
   // --- Agent process lifecycle ---

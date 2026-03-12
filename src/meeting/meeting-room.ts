@@ -191,15 +191,15 @@ export class MeetingRoom {
     if (this.status !== "active") return false;
     if (!this.joined.has(agentId)) return false;
 
-    // While awaiting approval, only the initiator can speak
-    if (this.awaitingApproval) {
-      if (agentId !== this.initiatorId) return false;
-    } else {
-      // In initiator_only phases, only initiator can speak
-      if (this.currentPhaseHas("initiator_only") && agentId !== this.initiatorId) return false;
+    // Initiator can always speak freely (they're the human driving the meeting)
+    const isInitiator = agentId === this.initiatorId;
 
-      // In non-initiator_only phases, must be current speaker
-      if (!this.currentPhaseHas("initiator_only") && this.currentSpeaker !== agentId) return false;
+    if (this.awaitingApproval) {
+      if (!isInitiator) return false;
+    } else if (!isInitiator) {
+      // Non-initiator agents follow turn rules
+      if (this.currentPhaseHas("initiator_only")) return false;
+      if (this.currentSpeaker !== agentId) return false;
     }
 
     const tokens = countTokens(content);
