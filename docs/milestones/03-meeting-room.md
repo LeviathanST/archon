@@ -1,6 +1,6 @@
 # Milestone 3: Meeting Room Core
 
-> Status: **Mostly Complete**
+> Status: **Complete**
 > Goal: The meeting loop works end-to-end through all 4 phases.
 
 ---
@@ -39,15 +39,30 @@
 - [x] Add all `meeting.*` handlers to router
 
 ### Persistence
-- [ ] Save decisions (DECIDE phase) to meetings.decisions JSONB
-- [ ] Save action items (ASSIGN phase) to meetings.action_items JSONB
+- [x] Save decisions (DECIDE phase) to meetings.decisions JSONB
+- [x] Save action items (ASSIGN phase) to meetings.action_items JSONB
 - [x] Update meeting status on completion
 
-### Tests
-- [ ] Phase transition tests
-- [ ] Budget exhaustion tests
-- [ ] Turn ordering tests
-- [ ] Meeting persistence tests
+### User-Defined Methodologies (2026-03-12)
+- [x] `src/meeting/methodology.ts` — PhaseCapability, PhaseDefinition, Methodology interfaces
+- [x] `src/meeting/methodology-parser.ts` — Markdown parser + DEFAULT_METHODOLOGY constant
+- [x] `src/meeting/methodology-loader.ts` — File loader with caching from `~/.archon/methodologies/`
+- [x] Phase type changed from fixed enum to free-form string (methodology-driven)
+- [x] Capability-based phase guards replace hardcoded phase name checks
+- [x] Dynamic budgets from methodology definitions (replaces PHASE_BUDGET constant)
+- [x] Phase description and meeting rules injected into relevance prompts
+- [x] `meetings.methodology` column added to DB schema
+- [x] `--methodology` CLI flag, AgentClient param, router integration
+- [x] archon-client synced: dynamic PhaseIndicator, methodology selector, capability-based UI
+
+### Tests (64 non-DB tests passing)
+- [x] Phase transition tests (`phases.test.ts` — 4 tests)
+- [x] Budget exhaustion tests (`meeting-room.test.ts`)
+- [x] Turn ordering tests (`turn-manager.test.ts` — 6 tests)
+- [x] Meeting persistence tests (`meeting-room.test.ts` — 13 tests incl. JSONB verification)
+- [x] Relevance prompt builder & parser tests (`relevance.test.ts` — 28 tests)
+- [x] Token counter tests (`token-counter.test.ts` — 3 tests)
+- [x] Methodology parser tests (`methodology-parser.test.ts` — 23 tests)
 
 ---
 
@@ -55,9 +70,11 @@
 - Token counter uses simple chars/4 estimation instead of tiktoken. Good enough for MVP, can upgrade later.
 - Relevance timeout was increased from 10s to 120s because CLI tools (claude --print, gemini -p) take 10-30s per call.
 - Meeting room is fully functional for end-to-end meetings, tested with 2 agents (Claude + Gemini).
-- Missing: persisting decisions/action_items to Postgres JSONB columns, and unit tests.
+- All persistence and test tasks completed 2026-03-11.
+- Methodology system added 2026-03-12: phases are now dynamic, driven by markdown definitions with capability-based enforcement.
+- Default "general" methodology preserves exact backward compat (same 4 phases, same budgets).
 
 ---
 
 ## Deliverable
-Agents can hold a structured meeting through all four phases.
+Agents can hold a structured meeting through all four phases, with user-defined methodology support.

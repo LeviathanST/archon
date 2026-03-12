@@ -1,0 +1,1 @@
+ALTER TABLE "meetings" ADD COLUMN "methodology" text DEFAULT 'general' NOT NULL;

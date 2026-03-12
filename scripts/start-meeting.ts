@@ -27,6 +27,7 @@ const initiatorId = get("--initiator");
 const agentIds = get("--agents").split(",").map((s) => s.trim());
 const title = get("--title", "Team Meeting");
 const agenda = get("--agenda", "Open discussion");
+const methodology = args.includes("--methodology") ? get("--methodology") : undefined;
 const hubUrl = get("--hub", "ws://localhost:9500");
 
 let meetingId = "";
@@ -38,6 +39,7 @@ console.log(`   Title: "${title}"`);
 console.log(`   Initiator: ${initiatorId}`);
 console.log(`   Agents: ${agentIds.join(", ")}`);
 console.log(`   Agenda: ${agenda}`);
+if (methodology) console.log(`   Methodology: ${methodology}`);
 
 const ws = new WebSocket(hubUrl);
 
@@ -63,6 +65,7 @@ ws.on("message", async (raw) => {
         invitees: agentIds,
         tokenBudget: 50000,
         agenda,
+        ...(methodology ? { methodology } : {}),
       }));
       break;
 

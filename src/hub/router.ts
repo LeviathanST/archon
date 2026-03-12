@@ -8,6 +8,7 @@ import { SessionManager } from "./session.js";
 import { discoverAgents } from "../registry/discovery.js";
 import { getAgentCard } from "../registry/agent-card.js";
 import { MeetingRoom } from "../meeting/meeting-room.js";
+import { loadMethodology, getDefaultMethodology } from "../meeting/methodology-loader.js";
 import { logger } from "../utils/logger.js";
 
 export class Router {
@@ -240,8 +241,21 @@ export class Router {
 
   private async handleMeetingCreate(
     agentId: string,
-    msg: { title: string; projectId?: string; invitees: string[]; tokenBudget?: number; agenda?: string }
+    msg: { title: string; projectId?: string; invitees: string[]; tokenBudget?: number; agenda?: string; methodology?: string }
   ): Promise<void> {
+    let methodology;
+    try {
+      methodology = msg.methodology
+        ? await loadMethodology(msg.methodology)
+        : getDefaultMethodology();
+    } catch (err) {
+      this.sessions.send(
+        agentId,
+        createError(ErrorCode.INVALID_MESSAGE, `Failed to load methodology "${msg.methodology}": ${(err as Error).message}`)
+      );
+      return;
+    }
+
     const room = new MeetingRoom({
       title: msg.title,
       initiatorId: agentId,
@@ -250,6 +264,7 @@ export class Router {
       tokenBudget: msg.tokenBudget,
       agenda: msg.agenda,
       send: (targetId, message) => this.sessions.send(targetId, message),
+      methodology,
     });
 
     await room.persist();

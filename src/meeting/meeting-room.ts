@@ -4,11 +4,10 @@ import { db } from "../db/connection.js";
 import { meetings, meetingParticipants, meetingMessages } from "../db/schema.js";
 import { logger } from "../utils/logger.js";
 import { countTokens } from "./token-counter.js";
-import { nextPhase } from "./phases.js";
 import { TurnManager } from "./turn-manager.js";
+import type { Methodology, PhaseCapability } from "./methodology.js";
+import { DEFAULT_METHODOLOGY } from "./methodology-parser.js";
 import {
-  PHASE_BUDGET,
-  type Phase,
   type Proposal,
   type ActionItem,
   type MeetingMessageOut,
@@ -36,6 +35,7 @@ export interface MeetingRoomOptions {
   tokenBudget?: number;
   agenda?: string;
   send: SendFn;
+  methodology?: Methodology;
 }
 
 export class MeetingRoom {
@@ -45,17 +45,14 @@ export class MeetingRoom {
   readonly projectId: string | undefined;
   readonly tokenBudget: number;
   readonly agenda: string | undefined;
+  readonly methodology: Methodology;
 
-  private phase: Phase = "present";
+  private phase: string;
+  private phaseIndex: number = 0;
   private status: "active" | "completed" | "cancelled" = "active";
   private tokensUsed = 0;
-  private phaseBudgets: Record<Phase, number>;
-  private phaseTokensUsed: Record<Phase, number> = {
-    present: 0,
-    discuss: 0,
-    decide: 0,
-    assign: 0,
-  };
+  private phaseBudgets: Map<string, number>;
+  private phaseTokensUsed: Map<string, number>;
 
   private participants = new Set<string>();
   private joined = new Set<string>();
@@ -79,20 +76,35 @@ export class MeetingRoom {
     this.tokenBudget = opts.tokenBudget ?? 50_000;
     this.agenda = opts.agenda;
     this.send = opts.send;
+    this.methodology = opts.methodology ?? DEFAULT_METHODOLOGY;
 
-    // Calculate per-phase budgets
-    this.phaseBudgets = {
-      present: Math.floor(this.tokenBudget * PHASE_BUDGET.present),
-      discuss: Math.floor(this.tokenBudget * PHASE_BUDGET.discuss),
-      decide: Math.floor(this.tokenBudget * PHASE_BUDGET.decide),
-      assign: Math.floor(this.tokenBudget * PHASE_BUDGET.assign),
-    };
+    // Init phase to first methodology phase
+    this.phase = this.methodology.phases[0].name;
+    this.phaseIndex = 0;
+
+    // Calculate per-phase budgets from methodology
+    this.phaseBudgets = new Map();
+    this.phaseTokensUsed = new Map();
+    for (const phaseDef of this.methodology.phases) {
+      this.phaseBudgets.set(phaseDef.name, Math.floor(this.tokenBudget * phaseDef.budget));
+      this.phaseTokensUsed.set(phaseDef.name, 0);
+    }
 
     // Add initiator + invitees as participants
     this.participants.add(opts.initiatorId);
     for (const id of opts.invitees) {
       this.participants.add(id);
     }
+  }
+
+  // --- Capability helpers ---
+
+  private currentPhaseDef() {
+    return this.methodology.phases[this.phaseIndex];
+  }
+
+  private currentPhaseHas(cap: PhaseCapability): boolean {
+    return this.currentPhaseDef().capabilities.has(cap);
   }
 
   // --- Lifecycle ---
@@ -108,6 +120,7 @@ export class MeetingRoom {
       tokenBudget: this.tokenBudget,
       tokensUsed: this.tokensUsed,
       agenda: this.agenda ?? null,
+      methodology: this.methodology.id,
     });
 
     // Insert participant records
@@ -169,23 +182,25 @@ export class MeetingRoom {
     if (this.status !== "active") return false;
     if (!this.joined.has(agentId)) return false;
 
-    // In PRESENT phase, only initiator can speak
-    if (this.phase === "present" && agentId !== this.initiatorId) return false;
+    // In initiator_only phases, only initiator can speak
+    if (this.currentPhaseHas("initiator_only") && agentId !== this.initiatorId) return false;
 
-    // In DISCUSS/DECIDE/ASSIGN, must be current speaker or initiator advancing
-    if (this.phase !== "present" && this.currentSpeaker !== agentId) return false;
+    // In non-initiator_only phases, must be current speaker
+    if (!this.currentPhaseHas("initiator_only") && this.currentSpeaker !== agentId) return false;
 
     const tokens = countTokens(content);
+    const currentUsed = this.phaseTokensUsed.get(this.phase) ?? 0;
+    const currentBudget = this.phaseBudgets.get(this.phase) ?? 0;
 
     // Check phase budget
-    if (this.phaseTokensUsed[this.phase] + tokens > this.phaseBudgets[this.phase]) {
+    if (currentUsed + tokens > currentBudget) {
       // Budget exhausted → auto-advance
       await this.advancePhase();
       return false;
     }
 
     // Track tokens
-    this.phaseTokensUsed[this.phase] += tokens;
+    this.phaseTokensUsed.set(this.phase, currentUsed + tokens);
     this.tokensUsed += tokens;
     this.consecutivePasses = 0;
     this.lastMessage = { agentId, content };
@@ -207,12 +222,12 @@ export class MeetingRoom {
       content,
       phase: this.phase,
       tokenCount: tokens,
-      budgetRemaining: this.phaseBudgets[this.phase] - this.phaseTokensUsed[this.phase],
+      budgetRemaining: currentBudget - (currentUsed + tokens),
     };
     this.broadcastToParticipants(msg);
 
-    // After speaking, start next relevance round (except in PRESENT)
-    if (this.phase !== "present") {
+    // After speaking, start next relevance round (except in initiator_only phases)
+    if (!this.currentPhaseHas("initiator_only")) {
       this.currentSpeaker = null;
       await this.startRelevanceRound();
     }
@@ -282,11 +297,14 @@ export class MeetingRoom {
     const next = this.speakingQueue.shift()!;
     this.currentSpeaker = next;
 
+    const currentUsed = this.phaseTokensUsed.get(this.phase) ?? 0;
+    const currentBudget = this.phaseBudgets.get(this.phase) ?? 0;
+
     const turn: MeetingYourTurnOut = {
       type: "meeting.your_turn",
       meetingId: this.id,
       phase: this.phase,
-      budgetRemaining: this.phaseBudgets[this.phase] - this.phaseTokensUsed[this.phase],
+      budgetRemaining: currentBudget - currentUsed,
     };
     this.send(next, turn);
   }
@@ -301,14 +319,14 @@ export class MeetingRoom {
   }
 
   private async advancePhase(): Promise<void> {
-    const next = nextPhase(this.phase);
-
-    if (next === "completed") {
+    // Use methodology phases array for next phase
+    if (this.phaseIndex >= this.methodology.phases.length - 1) {
       await this.completeMeeting();
       return;
     }
 
-    this.phase = next;
+    this.phaseIndex++;
+    this.phase = this.methodology.phases[this.phaseIndex].name;
     this.currentSpeaker = null;
     this.speakingQueue = [];
     this.consecutivePasses = 0;
@@ -321,17 +339,17 @@ export class MeetingRoom {
 
     this.broadcastPhaseChange();
 
-    // Auto-start relevance round for discuss/decide/assign
-    if (this.phase !== "present") {
+    // Auto-start relevance round for non-initiator_only phases
+    if (!this.currentPhaseHas("initiator_only")) {
       // Small delay to let clients process phase change
       setTimeout(() => this.startRelevanceRound(), 100);
     }
   }
 
-  // --- DECIDE phase: proposals & voting ---
+  // --- DECIDE phase: proposals & voting (requires "proposals" capability) ---
 
   async propose(agentId: string, proposal: string): Promise<boolean> {
-    if (this.phase !== "decide") return false;
+    if (!this.currentPhaseHas("proposals")) return false;
     if (!this.joined.has(agentId)) return false;
 
     const idx = this.proposals.length;
@@ -341,7 +359,7 @@ export class MeetingRoom {
     await db.insert(meetingMessages).values({
       meetingId: this.id,
       agentId,
-      phase: "decide",
+      phase: this.phase,
       content: `[PROPOSAL] ${proposal}`,
       tokenCount: countTokens(proposal),
     });
@@ -365,7 +383,7 @@ export class MeetingRoom {
     vote: "approve" | "reject" | "abstain",
     reason?: string
   ): Promise<boolean> {
-    if (this.phase !== "decide") return false;
+    if (!this.currentPhaseHas("proposals")) return false;
     if (!this.joined.has(agentId)) return false;
     if (proposalIndex < 0 || proposalIndex >= this.proposals.length) return false;
 
@@ -398,7 +416,7 @@ export class MeetingRoom {
     return true;
   }
 
-  // --- ASSIGN phase: action items ---
+  // --- ASSIGN phase: action items (requires "assignments" capability) ---
 
   async assignTask(
     agentId: string,
@@ -406,7 +424,7 @@ export class MeetingRoom {
     assigneeId: string,
     deadline?: string
   ): Promise<boolean> {
-    if (this.phase !== "assign") return false;
+    if (!this.currentPhaseHas("assignments")) return false;
     if (!this.joined.has(agentId)) return false;
 
     const idx = this.actionItems.length;
@@ -434,7 +452,7 @@ export class MeetingRoom {
   }
 
   async acknowledge(agentId: string, taskIndex: number): Promise<boolean> {
-    if (this.phase !== "assign") return false;
+    if (!this.currentPhaseHas("assignments")) return false;
     if (taskIndex < 0 || taskIndex >= this.actionItems.length) return false;
 
     const item = this.actionItems[taskIndex];
@@ -519,18 +537,24 @@ export class MeetingRoom {
   }
 
   private broadcastPhaseChange(): void {
+    const phaseDef = this.currentPhaseDef();
+    const currentUsed = this.phaseTokensUsed.get(this.phase) ?? 0;
+    const currentBudget = this.phaseBudgets.get(this.phase) ?? 0;
+
     const msg: MeetingPhaseChangeOut = {
       type: "meeting.phase_change",
       meetingId: this.id,
       phase: this.phase,
-      budgetRemaining: this.phaseBudgets[this.phase] - this.phaseTokensUsed[this.phase],
+      budgetRemaining: currentBudget - currentUsed,
+      phaseDescription: phaseDef.description,
+      capabilities: [...phaseDef.capabilities],
     };
     this.broadcastToParticipants(msg);
   }
 
   // --- Getters ---
 
-  getPhase(): Phase {
+  getPhase(): string {
     return this.phase;
   }
 
@@ -550,12 +574,12 @@ export class MeetingRoom {
     return this.tokensUsed;
   }
 
-  getPhaseTokensUsed(phase: Phase): number {
-    return this.phaseTokensUsed[phase];
+  getPhaseTokensUsed(phase: string): number {
+    return this.phaseTokensUsed.get(phase) ?? 0;
   }
 
-  getPhaseBudget(phase: Phase): number {
-    return this.phaseBudgets[phase];
+  getPhaseBudget(phase: string): number {
+    return this.phaseBudgets.get(phase) ?? 0;
   }
 
   getProposals(): readonly Proposal[] {
@@ -572,5 +596,9 @@ export class MeetingRoom {
 
   isActive(): boolean {
     return this.status === "active";
+  }
+
+  getMethodology(): Methodology {
+    return this.methodology;
   }
 }

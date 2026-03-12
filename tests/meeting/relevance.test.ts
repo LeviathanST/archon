@@ -66,10 +66,39 @@ describe("buildRelevancePrompt", () => {
   });
 
   it("handles all four phases", () => {
-    for (const phase of ["present", "discuss", "decide", "assign"] as const) {
+    for (const phase of ["present", "discuss", "decide", "assign"]) {
       const prompt = buildRelevancePrompt({ ...baseOpts, phase });
       expect(prompt).toContain(phase.toUpperCase());
     }
+  });
+
+  it("includes phase description when provided", () => {
+    const prompt = buildRelevancePrompt({
+      ...baseOpts,
+      phaseDescription: "Propose solutions and vote on them",
+    });
+    expect(prompt).toContain("Phase goal: Propose solutions and vote on them");
+  });
+
+  it("includes meeting rules when provided", () => {
+    const prompt = buildRelevancePrompt({
+      ...baseOpts,
+      meetingRules: ["Keep updates short", "Focus on blockers"],
+    });
+    expect(prompt).toContain("Meeting rules:");
+    expect(prompt).toContain("- Keep updates short");
+    expect(prompt).toContain("- Focus on blockers");
+  });
+
+  it("omits phase description and rules when not provided", () => {
+    const prompt = buildRelevancePrompt(baseOpts);
+    expect(prompt).not.toContain("Phase goal:");
+    expect(prompt).not.toContain("Meeting rules:");
+  });
+
+  it("works with custom phase names", () => {
+    const prompt = buildRelevancePrompt({ ...baseOpts, phase: "blockers" });
+    expect(prompt).toContain("BLOCKERS");
   });
 });
 

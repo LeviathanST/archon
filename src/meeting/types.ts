@@ -2,23 +2,15 @@ import { z } from "zod";
 
 // --- Phase & Relevance enums ---
 
-export const Phase = z.enum(["present", "discuss", "decide", "assign"]);
-export type Phase = z.infer<typeof Phase>;
+/** Phase is now a free-form string — methodology defines the valid phases. */
+export const Phase = z.string().min(1);
+export type Phase = string;
 
 export const MeetingStatus = z.enum(["active", "completed", "cancelled"]);
 export type MeetingStatus = z.infer<typeof MeetingStatus>;
 
 export const RelevanceLevel = z.enum(["must_speak", "could_add", "pass"]);
 export type RelevanceLevel = z.infer<typeof RelevanceLevel>;
-
-// --- Phase budget allocation (percentage of total token budget) ---
-
-export const PHASE_BUDGET: Record<Phase, number> = {
-  present: 0.2,
-  discuss: 0.5,
-  decide: 0.2,
-  assign: 0.1,
-};
 
 // --- Inbound meeting messages (agent → hub) ---
 
@@ -29,6 +21,7 @@ export const MeetingCreateMessage = z.object({
   invitees: z.array(z.string().min(1)).min(1),
   tokenBudget: z.number().int().positive().optional(),
   agenda: z.string().optional(),
+  methodology: z.string().optional(),
 });
 
 export const MeetingJoinMessage = z.object({
@@ -127,8 +120,10 @@ export interface MeetingInviteOut {
 export interface MeetingPhaseChangeOut {
   type: "meeting.phase_change";
   meetingId: string;
-  phase: Phase;
+  phase: string;
   budgetRemaining: number;
+  phaseDescription?: string;
+  capabilities?: string[];
 }
 
 export interface MeetingMessageOut {
@@ -136,7 +131,7 @@ export interface MeetingMessageOut {
   meetingId: string;
   agentId: string;
   content: string;
-  phase: Phase;
+  phase: string;
   tokenCount: number;
   budgetRemaining: number;
 }
@@ -145,14 +140,14 @@ export interface MeetingRelevanceCheckOut {
   type: "meeting.relevance_check";
   meetingId: string;
   lastMessage: { agentId: string; content: string };
-  phase: Phase;
+  phase: string;
   contextSummary: string;
 }
 
 export interface MeetingYourTurnOut {
   type: "meeting.your_turn";
   meetingId: string;
-  phase: Phase;
+  phase: string;
   budgetRemaining: number;
 }
 

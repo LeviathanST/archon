@@ -7,7 +7,7 @@
  * See PLAN.md §7.3 for the relevance prompt template design.
  */
 
-import type { Phase, RelevanceLevel } from "./types.js";
+import type { RelevanceLevel } from "./types.js";
 
 // --- Prompt builder ---
 
@@ -15,9 +15,11 @@ export interface BuildRelevancePromptOptions {
   agentName: string;
   strengths: string[];
   weaknesses: string[];
-  phase: Phase;
+  phase: string;
   contextSummary: string;
   lastMessage: { agentId: string; content: string };
+  phaseDescription?: string;
+  meetingRules?: string[];
 }
 
 /**
@@ -25,7 +27,8 @@ export interface BuildRelevancePromptOptions {
  *
  * Follows the template from PLAN.md §7.3:
  *   - Agent identity (name, strengths, weaknesses)
- *   - Meeting phase
+ *   - Meeting phase + description
+ *   - Meeting rules (if any)
  *   - Context summary
  *   - Last message
  *   - Response format instructions
@@ -38,9 +41,19 @@ export function buildRelevancePrompt(opts: BuildRelevancePromptOptions): string 
     ? opts.weaknesses.join(", ")
     : "none specified";
 
+  let phaseBlock = `Meeting phase: ${opts.phase.toUpperCase()}`;
+  if (opts.phaseDescription) {
+    phaseBlock += `\nPhase goal: ${opts.phaseDescription}`;
+  }
+
+  let rulesBlock = "";
+  if (opts.meetingRules && opts.meetingRules.length > 0) {
+    rulesBlock = `\nMeeting rules:\n${opts.meetingRules.map((r) => `- ${r}`).join("\n")}`;
+  }
+
   return `You are ${opts.agentName}. Your expertise: ${strengths}. Your weaknesses: ${weaknesses}.
 
-Meeting phase: ${opts.phase.toUpperCase()}
+${phaseBlock}${rulesBlock}
 Meeting context so far: ${opts.contextSummary}
 Last message (by ${opts.lastMessage.agentId}): ${opts.lastMessage.content}
 
