@@ -147,6 +147,12 @@ export const RoleDeleteMessage = z.object({
   roleId: z.string().min(1),
 });
 
+// --- Active Meetings ---
+
+export const MeetingActiveListMessage = z.object({
+  type: z.literal("meeting.active_list"),
+});
+
 // --- Meeting History ---
 
 export const MeetingHistoryMessage = z.object({
@@ -159,6 +165,18 @@ export const MeetingHistoryMessage = z.object({
 export const MeetingTranscriptMessage = z.object({
   type: z.literal("meeting.transcript"),
   meetingId: z.string().min(1),
+});
+
+// --- Hub Config ---
+
+export const ConfigGetMessage = z.object({
+  type: z.literal("config.get"),
+});
+
+export const ConfigSetMessage = z.object({
+  type: z.literal("config.set"),
+  key: z.string().min(1),
+  value: z.unknown(),
 });
 
 // --- Ping/Pong ---
@@ -202,9 +220,14 @@ export const InboundMessage = z.discriminatedUnion("type", [
   MeetingAcknowledgeMessage,
   MeetingApproveMessage,
   MeetingCancelMessage,
+  // Active meetings
+  MeetingActiveListMessage,
   // Meeting history
   MeetingHistoryMessage,
   MeetingTranscriptMessage,
+  // Hub config
+  ConfigGetMessage,
+  ConfigSetMessage,
 ]);
 
 // --- Type exports ---
@@ -228,6 +251,9 @@ export type RoleListMessage = z.infer<typeof RoleListMessage>;
 export type RoleCreateMessage = z.infer<typeof RoleCreateMessage>;
 export type RoleUpdateMessage = z.infer<typeof RoleUpdateMessage>;
 export type RoleDeleteMessage = z.infer<typeof RoleDeleteMessage>;
+export type MeetingActiveListMessage = z.infer<typeof MeetingActiveListMessage>;
 export type MeetingHistoryMessage = z.infer<typeof MeetingHistoryMessage>;
 export type MeetingTranscriptMessage = z.infer<typeof MeetingTranscriptMessage>;
+export type ConfigGetMessage = z.infer<typeof ConfigGetMessage>;
+export type ConfigSetMessage = z.infer<typeof ConfigSetMessage>;
 export type InboundMessage = z.infer<typeof InboundMessage>;

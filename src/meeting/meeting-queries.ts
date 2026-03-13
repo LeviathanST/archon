@@ -44,6 +44,7 @@ export interface MeetingTranscriptResult {
     agenda: unknown;
     decisions: unknown[];
     actionItems: unknown[];
+    summary: string | null;
     createdAt: Date;
     completedAt: Date | null;
   };
@@ -147,6 +148,7 @@ export async function getMeetingTranscript(meetingId: string): Promise<MeetingTr
       agenda: meeting.agenda,
       decisions: meeting.decisions ?? [],
       actionItems: meeting.actionItems ?? [],
+      summary: meeting.summary ?? null,
       createdAt: meeting.createdAt,
       completedAt: meeting.completedAt,
     },

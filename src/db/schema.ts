@@ -127,6 +127,7 @@ export const meetings = pgTable(
     agenda: jsonb("agenda"),
     decisions: jsonb("decisions").$type<unknown[]>().default([]),
     actionItems: jsonb("action_items").$type<unknown[]>().default([]),
+    summary: text("summary"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
