@@ -28,18 +28,19 @@ const agentIds = get("--agents").split(",").map((s) => s.trim());
 const title = get("--title", "Team Meeting");
 const agenda = get("--agenda", "Open discussion");
 const methodology = args.includes("--methodology") ? get("--methodology") : undefined;
+const approvalRequired = args.includes("--approval");
 const hubUrl = get("--hub", "ws://localhost:9500");
 
 let meetingId = "";
 let currentPhase = "";
-const allParticipants = [initiatorId, ...agentIds];
 
 console.log(`\n🏢 Archon Meeting`);
 console.log(`   Title: "${title}"`);
 console.log(`   Initiator: ${initiatorId}`);
 console.log(`   Agents: ${agentIds.join(", ")}`);
-console.log(`   Agenda: ${agenda}`);
+console.log(`   Agenda: ${agenda.slice(0, 300)}${agenda.length > 300 ? "..." : ""}`);
 if (methodology) console.log(`   Methodology: ${methodology}`);
+if (approvalRequired) console.log(`   Phase control: CEO approves each phase transition`);
 
 const ws = new WebSocket(hubUrl);
 
@@ -66,6 +67,7 @@ ws.on("message", async (raw) => {
         tokenBudget: 50000,
         agenda,
         ...(methodology ? { methodology } : {}),
+        ...(approvalRequired ? { approvalRequired: true } : {}),
       }));
       break;
 
@@ -82,23 +84,23 @@ ws.on("message", async (raw) => {
 
       if (msg.phase === "present") {
         // Present the topic
-        console.log(`   [${initiatorId}] Presenting: "${agenda}"`);
+        console.log(`   [${initiatorId}] Presenting: "${agenda.slice(0, 200)}${agenda.length > 200 ? "..." : ""}"`);
         ws.send(JSON.stringify({
           type: "meeting.speak",
           meetingId,
           content: agenda,
         }));
-
-        // Wait a moment then advance to DISCUSS
-        setTimeout(() => {
-          console.log(`\n   → Advancing to DISCUSS...\n`);
-          ws.send(JSON.stringify({ type: "meeting.advance", meetingId }));
-        }, 1000);
       }
       break;
 
     case "meeting.message":
       console.log(`   💬 [${msg.agentId}] ${msg.content}`);
+      break;
+
+    case "meeting.awaiting_approval":
+      console.log(`\n   ⏸  Phase "${msg.currentPhase}" complete → next: "${msg.nextPhase ?? 'END'}"`);
+      console.log(`   → Auto-approving phase transition...\n`);
+      ws.send(JSON.stringify({ type: "meeting.advance", meetingId }));
       break;
 
     case "meeting.relevance_check":
@@ -159,6 +161,9 @@ ws.on("message", async (raw) => {
           const item = a as { task: string; assigneeId: string; acknowledged: boolean };
           console.log(`     ${item.acknowledged ? "✓" : "○"} ${item.task} → ${item.assigneeId}`);
         }
+      }
+      if (msg.summary) {
+        console.log(`\n   Summary:\n${msg.summary}`);
       }
       console.log(`   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
       rl.close();

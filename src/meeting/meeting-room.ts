@@ -4,6 +4,7 @@ import { db } from "../db/connection.js";
 import { meetings, meetingParticipants, meetingMessages } from "../db/schema.js";
 import { logger } from "../utils/logger.js";
 import { countTokens } from "./token-counter.js";
+import { generateMeetingSummary, type SummaryMode } from "./summarizer.js";
 import { TurnManager } from "./turn-manager.js";
 import type { Methodology, PhaseCapability } from "./methodology.js";
 import { DEFAULT_METHODOLOGY } from "./methodology-parser.js";
@@ -20,6 +21,7 @@ import {
   type MeetingActionItemOut,
   type MeetingCompletedOut,
   type MeetingCancelledOut,
+  type MeetingAwaitingApprovalOut,
 } from "./types.js";
 
 export interface SendFn {
@@ -36,6 +38,10 @@ export interface MeetingRoomOptions {
   agenda?: string;
   send: SendFn;
   methodology?: Methodology;
+  approvalRequired?: boolean;
+  summaryMode?: SummaryMode;
+  /** Called when meeting completes or is cancelled. */
+  onEnd?: (meetingId: string) => void;
 }
 
 export class MeetingRoom {
@@ -46,10 +52,13 @@ export class MeetingRoom {
   readonly tokenBudget: number;
   readonly agenda: string | undefined;
   readonly methodology: Methodology;
+  readonly approvalRequired: boolean;
+  readonly summaryMode: SummaryMode;
 
   private phase: string;
   private phaseIndex: number = 0;
   private status: "active" | "completed" | "cancelled" = "active";
+  private awaitingApproval = false;
   private tokensUsed = 0;
   private phaseBudgets: Map<string, number>;
   private phaseTokensUsed: Map<string, number>;
@@ -59,6 +68,7 @@ export class MeetingRoom {
 
   private proposals: Proposal[] = [];
   private actionItems: ActionItem[] = [];
+  private messageLog: Array<{ agentId: string; phase: string; content: string }> = [];
 
   private turnManager = new TurnManager();
   private speakingQueue: string[] = [];
@@ -67,6 +77,7 @@ export class MeetingRoom {
   private lastMessage: { agentId: string; content: string } | null = null;
 
   private send: SendFn;
+  private onEnd?: (meetingId: string) => void;
 
   constructor(opts: MeetingRoomOptions) {
     this.id = opts.id ?? nanoid(12);
@@ -77,6 +88,9 @@ export class MeetingRoom {
     this.agenda = opts.agenda;
     this.send = opts.send;
     this.methodology = opts.methodology ?? DEFAULT_METHODOLOGY;
+    this.approvalRequired = opts.approvalRequired ?? false;
+    this.summaryMode = opts.summaryMode ?? "off";
+    this.onEnd = opts.onEnd;
 
     // Init phase to first methodology phase
     this.phase = this.methodology.phases[0].name;
@@ -149,6 +163,11 @@ export class MeetingRoom {
 
   // --- Join/Leave ---
 
+  /** Add an agent as a participant (for admin/CEO joining mid-meeting). */
+  addParticipant(agentId: string): void {
+    this.participants.add(agentId);
+  }
+
   join(agentId: string): boolean {
     if (!this.participants.has(agentId)) return false;
     if (this.status !== "active") return false;
@@ -182,11 +201,16 @@ export class MeetingRoom {
     if (this.status !== "active") return false;
     if (!this.joined.has(agentId)) return false;
 
-    // In initiator_only phases, only initiator can speak
-    if (this.currentPhaseHas("initiator_only") && agentId !== this.initiatorId) return false;
+    // Initiator can always speak freely (they're the human driving the meeting)
+    const isInitiator = agentId === this.initiatorId;
 
-    // In non-initiator_only phases, must be current speaker
-    if (!this.currentPhaseHas("initiator_only") && this.currentSpeaker !== agentId) return false;
+    if (this.awaitingApproval) {
+      if (!isInitiator) return false;
+    } else if (!isInitiator) {
+      // Non-initiator agents follow turn rules
+      if (this.currentPhaseHas("initiator_only")) return false;
+      if (this.currentSpeaker !== agentId) return false;
+    }
 
     const tokens = countTokens(content);
     const currentUsed = this.phaseTokensUsed.get(this.phase) ?? 0;
@@ -213,6 +237,7 @@ export class MeetingRoom {
       content,
       tokenCount: tokens,
     });
+    this.messageLog.push({ agentId, phase: this.phase, content });
 
     // Broadcast to all participants
     const msg: MeetingMessageOut = {
@@ -226,8 +251,11 @@ export class MeetingRoom {
     };
     this.broadcastToParticipants(msg);
 
-    // After speaking, start next relevance round (except in initiator_only phases)
-    if (!this.currentPhaseHas("initiator_only")) {
+    // After speaking in initiator_only phase, auto-advance to next phase
+    if (this.currentPhaseHas("initiator_only")) {
+      await this.advancePhase();
+    } else {
+      // In open phases, start next relevance round
       this.currentSpeaker = null;
       await this.startRelevanceRound();
     }
@@ -314,11 +342,49 @@ export class MeetingRoom {
   async advance(agentId: string): Promise<boolean> {
     // Only initiator can manually advance
     if (agentId !== this.initiatorId) return false;
+
+    // If awaiting approval, treat advance as approve
+    if (this.awaitingApproval) {
+      return this.approve(agentId);
+    }
+
     await this.advancePhase();
     return true;
   }
 
   private async advancePhase(): Promise<void> {
+    // If approval is required, pause and ask initiator before advancing
+    if (this.approvalRequired && !this.awaitingApproval) {
+      this.awaitingApproval = true;
+      this.currentSpeaker = null;
+      this.speakingQueue = [];
+
+      const isLastPhase = this.phaseIndex >= this.methodology.phases.length - 1;
+      const nextPhase = isLastPhase
+        ? null
+        : this.methodology.phases[this.phaseIndex + 1].name;
+
+      const currentUsed = this.phaseTokensUsed.get(this.phase) ?? 0;
+      const currentBudget = this.phaseBudgets.get(this.phase) ?? 0;
+
+      const msg: MeetingAwaitingApprovalOut = {
+        type: "meeting.awaiting_approval",
+        meetingId: this.id,
+        currentPhase: this.phase,
+        nextPhase,
+        summary: {
+          messagesInPhase: 0, // TODO: track per-phase message count
+          tokensUsed: currentUsed,
+          tokenBudget: currentBudget,
+        },
+      };
+      // Broadcast to all participants (initiator + agents)
+      this.broadcastToParticipants(msg);
+
+      logger.info({ meetingId: this.id, currentPhase: this.phase, nextPhase }, "Awaiting initiator approval to advance phase");
+      return;
+    }
+
     // Use methodology phases array for next phase
     if (this.phaseIndex >= this.methodology.phases.length - 1) {
       await this.completeMeeting();
@@ -330,6 +396,7 @@ export class MeetingRoom {
     this.currentSpeaker = null;
     this.speakingQueue = [];
     this.consecutivePasses = 0;
+    this.awaitingApproval = false;
 
     // Update DB
     await db
@@ -344,6 +411,16 @@ export class MeetingRoom {
       // Small delay to let clients process phase change
       setTimeout(() => this.startRelevanceRound(), 100);
     }
+  }
+
+  /** Initiator approves advancing to the next phase */
+  async approve(agentId: string): Promise<boolean> {
+    if (agentId !== this.initiatorId) return false;
+    if (!this.awaitingApproval) return false;
+
+    this.awaitingApproval = false;
+    await this.advancePhase();
+    return true;
   }
 
   // --- DECIDE phase: proposals & voting (requires "proposals" capability) ---
@@ -486,6 +563,23 @@ export class MeetingRoom {
         votes: p.votes,
       }));
 
+    // Generate meeting summary (if enabled for this meeting)
+    let summary: string | null = null;
+    try {
+      summary = await generateMeetingSummary(this.summaryMode, {
+        title: this.title,
+        agenda: this.agenda,
+        participants: [...this.participants],
+        messages: this.messageLog,
+        decisions,
+        actionItems: this.actionItems,
+        tokensUsed: this.tokensUsed,
+        methodology: this.methodology.id,
+      });
+    } catch (err) {
+      logger.warn({ meetingId: this.id, error: (err as Error).message }, "Failed to generate meeting summary");
+    }
+
     // Persist
     await db
       .update(meetings)
@@ -494,6 +588,7 @@ export class MeetingRoom {
         tokensUsed: this.tokensUsed,
         decisions,
         actionItems: this.actionItems,
+        summary: summary ?? null,
         completedAt: new Date(),
       })
       .where(eq(meetings.id, this.id));
@@ -504,10 +599,12 @@ export class MeetingRoom {
       meetingId: this.id,
       decisions,
       actionItems: this.actionItems,
+      summary: summary ?? undefined,
     };
     this.broadcastToParticipants(out);
 
-    logger.info({ meetingId: this.id, decisions: decisions.length, actionItems: this.actionItems.length }, "Meeting completed");
+    logger.info({ meetingId: this.id, decisions: decisions.length, actionItems: this.actionItems.length, hasSummary: !!summary }, "Meeting completed");
+    this.onEnd?.(this.id);
   }
 
   async cancel(reason: string): Promise<void> {
@@ -526,6 +623,7 @@ export class MeetingRoom {
     this.broadcastToParticipants(out);
 
     logger.info({ meetingId: this.id, reason }, "Meeting cancelled");
+    this.onEnd?.(this.id);
   }
 
   // --- Utilities ---

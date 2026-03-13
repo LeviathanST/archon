@@ -47,7 +47,6 @@ async function seed(): Promise<void> {
       id: "ceo",
       displayName: "CEO",
       workspacePath: "~/.archon/agents/ceo",
-      status: "offline",
       modelConfig: { provider: "acpx", backend: "claude-code" },
     })
     .onConflictDoNothing();
@@ -70,13 +69,11 @@ async function seed(): Promise<void> {
         id: "alice",
         displayName: "Alice",
         workspacePath: "~/.archon/agents/alice",
-        status: "offline",
       },
       {
         id: "bob",
         displayName: "Bob",
         workspacePath: "~/.archon/agents/bob",
-        status: "offline",
       },
     ])
     .onConflictDoNothing();
@@ -87,6 +84,33 @@ async function seed(): Promise<void> {
     .values([
       { agentId: "alice", departmentId: "engineering", roleId: "lead_dev" },
       { agentId: "bob", departmentId: "engineering", roleId: "lead_dev" },
+    ])
+    .onConflictDoNothing();
+
+  // --- Review agents for testing ---
+  await db
+    .insert(agents)
+    .values([
+      {
+        id: "code-reviewer",
+        displayName: "Code Reviewer",
+        workspacePath: "~/.archon/agents/code-reviewer",
+        modelConfig: { provider: "cli-claude", model: "sonnet" },
+      },
+      {
+        id: "ux-reviewer",
+        displayName: "UX Reviewer",
+        workspacePath: "~/.archon/agents/ux-reviewer",
+        modelConfig: { provider: "cli-claude", model: "sonnet" },
+      },
+    ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(agentDepartments)
+    .values([
+      { agentId: "code-reviewer", departmentId: "engineering", roleId: "lead_dev" },
+      { agentId: "ux-reviewer", departmentId: "engineering", roleId: "lead_dev" },
     ])
     .onConflictDoNothing();
 

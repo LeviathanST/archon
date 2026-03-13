@@ -22,6 +22,8 @@ export const MeetingCreateMessage = z.object({
   tokenBudget: z.number().int().positive().optional(),
   agenda: z.string().optional(),
   methodology: z.string().optional(),
+  approvalRequired: z.boolean().optional(),
+  summaryMode: z.enum(["off", "structured", "llm"]).optional(),
 });
 
 export const MeetingJoinMessage = z.object({
@@ -80,6 +82,17 @@ export const MeetingAcknowledgeMessage = z.object({
   taskIndex: z.number().int().min(0),
 });
 
+export const MeetingApproveMessage = z.object({
+  type: z.literal("meeting.approve"),
+  meetingId: z.string().min(1),
+});
+
+export const MeetingCancelMessage = z.object({
+  type: z.literal("meeting.cancel"),
+  meetingId: z.string().min(1),
+  reason: z.string().optional(),
+});
+
 // --- All inbound meeting message types ---
 
 export const MeetingInboundMessage = z.discriminatedUnion("type", [
@@ -93,6 +106,8 @@ export const MeetingInboundMessage = z.discriminatedUnion("type", [
   MeetingVoteMessage,
   MeetingAssignMessage,
   MeetingAcknowledgeMessage,
+  MeetingApproveMessage,
+  MeetingCancelMessage,
 ]);
 
 export type MeetingCreateMessage = z.infer<typeof MeetingCreateMessage>;
@@ -105,6 +120,8 @@ export type MeetingProposeMessage = z.infer<typeof MeetingProposeMessage>;
 export type MeetingVoteMessage = z.infer<typeof MeetingVoteMessage>;
 export type MeetingAssignMessage = z.infer<typeof MeetingAssignMessage>;
 export type MeetingAcknowledgeMessage = z.infer<typeof MeetingAcknowledgeMessage>;
+export type MeetingApproveMessage = z.infer<typeof MeetingApproveMessage>;
+export type MeetingCancelMessage = z.infer<typeof MeetingCancelMessage>;
 export type MeetingInboundMessage = z.infer<typeof MeetingInboundMessage>;
 
 // --- Outbound meeting messages (hub → agent) ---
@@ -183,6 +200,19 @@ export interface MeetingCompletedOut {
   meetingId: string;
   decisions: unknown[];
   actionItems: unknown[];
+  summary?: string;
+}
+
+export interface MeetingAwaitingApprovalOut {
+  type: "meeting.awaiting_approval";
+  meetingId: string;
+  currentPhase: string;
+  nextPhase: string | null;
+  summary: {
+    messagesInPhase: number;
+    tokensUsed: number;
+    tokenBudget: number;
+  };
 }
 
 export interface MeetingCancelledOut {
