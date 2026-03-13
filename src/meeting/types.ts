@@ -23,6 +23,7 @@ export const MeetingCreateMessage = z.object({
   agenda: z.string().optional(),
   methodology: z.string().optional(),
   approvalRequired: z.boolean().optional(),
+  summaryMode: z.enum(["off", "structured", "llm"]).optional(),
 });
 
 export const MeetingJoinMessage = z.object({
@@ -199,6 +200,7 @@ export interface MeetingCompletedOut {
   meetingId: string;
   decisions: unknown[];
   actionItems: unknown[];
+  summary?: string;
 }
 
 export interface MeetingAwaitingApprovalOut {

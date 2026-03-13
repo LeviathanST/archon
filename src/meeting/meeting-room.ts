@@ -4,6 +4,7 @@ import { db } from "../db/connection.js";
 import { meetings, meetingParticipants, meetingMessages } from "../db/schema.js";
 import { logger } from "../utils/logger.js";
 import { countTokens } from "./token-counter.js";
+import { generateMeetingSummary, type SummaryMode } from "./summarizer.js";
 import { TurnManager } from "./turn-manager.js";
 import type { Methodology, PhaseCapability } from "./methodology.js";
 import { DEFAULT_METHODOLOGY } from "./methodology-parser.js";
@@ -38,6 +39,7 @@ export interface MeetingRoomOptions {
   send: SendFn;
   methodology?: Methodology;
   approvalRequired?: boolean;
+  summaryMode?: SummaryMode;
   /** Called when meeting completes or is cancelled. */
   onEnd?: (meetingId: string) => void;
 }
@@ -51,6 +53,7 @@ export class MeetingRoom {
   readonly agenda: string | undefined;
   readonly methodology: Methodology;
   readonly approvalRequired: boolean;
+  readonly summaryMode: SummaryMode;
 
   private phase: string;
   private phaseIndex: number = 0;
@@ -65,6 +68,7 @@ export class MeetingRoom {
 
   private proposals: Proposal[] = [];
   private actionItems: ActionItem[] = [];
+  private messageLog: Array<{ agentId: string; phase: string; content: string }> = [];
 
   private turnManager = new TurnManager();
   private speakingQueue: string[] = [];
@@ -85,6 +89,7 @@ export class MeetingRoom {
     this.send = opts.send;
     this.methodology = opts.methodology ?? DEFAULT_METHODOLOGY;
     this.approvalRequired = opts.approvalRequired ?? false;
+    this.summaryMode = opts.summaryMode ?? "off";
     this.onEnd = opts.onEnd;
 
     // Init phase to first methodology phase
@@ -158,6 +163,11 @@ export class MeetingRoom {
 
   // --- Join/Leave ---
 
+  /** Add an agent as a participant (for admin/CEO joining mid-meeting). */
+  addParticipant(agentId: string): void {
+    this.participants.add(agentId);
+  }
+
   join(agentId: string): boolean {
     if (!this.participants.has(agentId)) return false;
     if (this.status !== "active") return false;
@@ -227,6 +237,7 @@ export class MeetingRoom {
       content,
       tokenCount: tokens,
     });
+    this.messageLog.push({ agentId, phase: this.phase, content });
 
     // Broadcast to all participants
     const msg: MeetingMessageOut = {
@@ -552,6 +563,23 @@ export class MeetingRoom {
         votes: p.votes,
       }));
 
+    // Generate meeting summary (if enabled for this meeting)
+    let summary: string | null = null;
+    try {
+      summary = await generateMeetingSummary(this.summaryMode, {
+        title: this.title,
+        agenda: this.agenda,
+        participants: [...this.participants],
+        messages: this.messageLog,
+        decisions,
+        actionItems: this.actionItems,
+        tokensUsed: this.tokensUsed,
+        methodology: this.methodology.id,
+      });
+    } catch (err) {
+      logger.warn({ meetingId: this.id, error: (err as Error).message }, "Failed to generate meeting summary");
+    }
+
     // Persist
     await db
       .update(meetings)
@@ -560,6 +588,7 @@ export class MeetingRoom {
         tokensUsed: this.tokensUsed,
         decisions,
         actionItems: this.actionItems,
+        summary: summary ?? null,
         completedAt: new Date(),
       })
       .where(eq(meetings.id, this.id));
@@ -570,10 +599,11 @@ export class MeetingRoom {
       meetingId: this.id,
       decisions,
       actionItems: this.actionItems,
+      summary: summary ?? undefined,
     };
     this.broadcastToParticipants(out);
 
-    logger.info({ meetingId: this.id, decisions: decisions.length, actionItems: this.actionItems.length }, "Meeting completed");
+    logger.info({ meetingId: this.id, decisions: decisions.length, actionItems: this.actionItems.length, hasSummary: !!summary }, "Meeting completed");
     this.onEnd?.(this.id);
   }
 
