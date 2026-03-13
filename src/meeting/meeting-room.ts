@@ -3,7 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { meetings, meetingParticipants, meetingMessages } from "../db/schema.js";
 import { logger } from "../utils/logger.js";
-import { countTokens } from "./token-counter.js";
+import { countTokens, TOKEN_SAFETY_MARGIN } from "./token-counter.js";
 import { generateMeetingSummary, type SummaryMode } from "./summarizer.js";
 import { TurnManager } from "./turn-manager.js";
 import type { Methodology, PhaseCapability } from "./methodology.js";
@@ -96,11 +96,15 @@ export class MeetingRoom {
     this.phase = this.methodology.phases[0].name;
     this.phaseIndex = 0;
 
-    // Calculate per-phase budgets from methodology
+    // Calculate per-phase budgets from methodology.
+    // Apply safety margin because chars/4 underestimates real token counts.
     this.phaseBudgets = new Map();
     this.phaseTokensUsed = new Map();
     for (const phaseDef of this.methodology.phases) {
-      this.phaseBudgets.set(phaseDef.name, Math.floor(this.tokenBudget * phaseDef.budget));
+      this.phaseBudgets.set(
+        phaseDef.name,
+        Math.floor(this.tokenBudget * phaseDef.budget * TOKEN_SAFETY_MARGIN),
+      );
       this.phaseTokensUsed.set(phaseDef.name, 0);
     }
 
