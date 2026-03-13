@@ -149,9 +149,13 @@ export class AgentSpawner {
       // Use tsx from node_modules/.bin
       const tsxPath = resolve(process.cwd(), "node_modules/.bin/tsx");
 
+      // Remove CLAUDECODE env var to allow nested Claude Code sessions
+      const env = { ...process.env };
+      delete env.CLAUDECODE;
+
       const proc = spawn(tsxPath, args, {
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env },
+        env,
         detached: false,
       });
 
