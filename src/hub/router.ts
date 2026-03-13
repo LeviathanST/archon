@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { InboundMessage, AuthMessage } from "../protocol/messages.js";
 import { createError, ErrorCode } from "../protocol/errors.js";
 import { db } from "../db/connection.js";
-import { agents } from "../db/schema.js";
+import { agents, meetingParticipants } from "../db/schema.js";
 import { SessionManager } from "./session.js";
 import { discoverAgents } from "../registry/discovery.js";
 import { getAgentCard } from "../registry/agent-card.js";
@@ -15,6 +15,7 @@ import {
   listRoles, createRoleFull, updateRoleFull, deleteRoleFull,
 } from "../registry/department-crud.js";
 import { listMeetings, getMeetingTranscript } from "../meeting/meeting-queries.js";
+import { getLLMConfig, setLLMConfig, isLLMAvailable } from "../meeting/summarizer.js";
 import { AgentSpawner } from "./agent-spawner.js";
 import { logger } from "../utils/logger.js";
 
@@ -136,7 +137,7 @@ export class Router {
         break;
 
       case "meeting.join":
-        this.handleMeetingJoin(agentId, message.meetingId);
+        await this.handleMeetingJoin(agentId, message.meetingId);
         break;
 
       case "meeting.leave":
@@ -191,6 +192,10 @@ export class Router {
         await this.handleMeetingCancel(agentId, message.meetingId, message.reason);
         break;
 
+      case "meeting.active_list":
+        await this.handleMeetingActiveList(agentId);
+        break;
+
       // --- Meeting history ---
       case "meeting.history":
         await this.handleMeetingHistory(agentId, message);
@@ -198,6 +203,15 @@ export class Router {
 
       case "meeting.transcript":
         await this.handleMeetingTranscript(agentId, message.meetingId);
+        break;
+
+      // --- Hub config ---
+      case "config.get":
+        await this.handleConfigGet(agentId);
+        break;
+
+      case "config.set":
+        await this.handleConfigSet(agentId, message.key, message.value);
         break;
 
       default:
@@ -257,6 +271,8 @@ export class Router {
       title: string;
       phase: string;
       initiator: string;
+      participants: string[];
+      budgetRemaining: number;
     }> = [];
 
     for (const [meetingId, room] of this.activeMeetings) {
@@ -269,6 +285,8 @@ export class Router {
           title: room.title,
           phase: room.getPhase(),
           initiator: room.initiatorId,
+          participants: room.getParticipants(),
+          budgetRemaining: room.tokenBudget - room.getTokensUsed(),
         });
         // Update session to track current meeting
         const session = this.sessions.get(agentId);
@@ -347,7 +365,7 @@ export class Router {
 
   private async handleMeetingCreate(
     agentId: string,
-    msg: { title: string; projectId?: string; invitees: string[]; tokenBudget?: number; agenda?: string; methodology?: string; approvalRequired?: boolean }
+    msg: { title: string; projectId?: string; invitees: string[]; tokenBudget?: number; agenda?: string; methodology?: string; approvalRequired?: boolean; summaryMode?: "off" | "structured" | "llm" }
   ): Promise<void> {
     let methodology;
     try {
@@ -372,6 +390,7 @@ export class Router {
       send: (targetId, message) => this.sessions.send(targetId, message),
       methodology,
       approvalRequired: msg.approvalRequired,
+      summaryMode: msg.summaryMode,
       onEnd: (meetingId) => this.handleMeetingEnd(meetingId),
     });
 
@@ -423,9 +442,26 @@ export class Router {
     }
   }
 
-  private handleMeetingJoin(agentId: string, meetingId: string): void {
+  private async handleMeetingJoin(agentId: string, meetingId: string): Promise<void> {
     const room = this.getMeetingOrError(agentId, meetingId);
     if (!room) return;
+
+    // If agent is not a participant, check if they're admin/CEO — allow them to join
+    if (!room.getParticipants().includes(agentId)) {
+      const { canManageAgents } = await import("../registry/agent-crud.js");
+      const isAdmin = await canManageAgents(agentId);
+      if (!isAdmin) {
+        this.sessions.send(agentId, createError(ErrorCode.PERMISSION_DENIED, "Cannot join meeting — not a participant"));
+        return;
+      }
+      // Add as participant and persist
+      room.addParticipant(agentId);
+      await db.insert(meetingParticipants).values({
+        meetingId,
+        agentId,
+      }).onConflictDoNothing();
+      logger.info({ meetingId, agentId }, "Admin joined meeting as new participant");
+    }
 
     const ok = room.join(agentId);
     if (!ok) {
@@ -436,6 +472,14 @@ export class Router {
     // Update session
     const session = this.sessions.get(agentId);
     if (session) session.currentMeetingId = meetingId;
+
+    // Send current meeting state to the joining agent
+    this.sessions.send(agentId, {
+      type: "meeting.created",
+      meetingId: room.id,
+      title: room.title,
+      participants: room.getParticipants(),
+    });
 
     logger.info({ meetingId, agentId }, "Agent joined meeting");
   }
@@ -786,6 +830,78 @@ export class Router {
     }
 
     await room.cancel(reason ?? "Cancelled by initiator");
+  }
+
+  // --- Hub config ---
+
+  private async handleConfigGet(agentId: string): Promise<void> {
+    const { canManageAgents } = await import("../registry/agent-crud.js");
+    const isAdmin = await canManageAgents(agentId);
+    if (!isAdmin) {
+      this.sessions.send(agentId, createError(ErrorCode.PERMISSION_DENIED, "Only admins can read hub config"));
+      return;
+    }
+
+    this.sendConfigResult(agentId);
+  }
+
+  private async handleConfigSet(agentId: string, key: string, value: unknown): Promise<void> {
+    const { canManageAgents } = await import("../registry/agent-crud.js");
+    const isAdmin = await canManageAgents(agentId);
+    if (!isAdmin) {
+      this.sessions.send(agentId, createError(ErrorCode.PERMISSION_DENIED, "Only admins can update hub config"));
+      return;
+    }
+
+    const error = setLLMConfig(key, value);
+    if (error) {
+      this.sessions.send(agentId, createError(ErrorCode.INVALID_MESSAGE, error));
+      return;
+    }
+
+    this.sendConfigResult(agentId);
+  }
+
+  private sendConfigResult(agentId: string): void {
+    const config = getLLMConfig();
+    this.sessions.send(agentId, {
+      type: "config.result",
+      config: {
+        llmAvailable: isLLMAvailable(),
+        llmApiKey: config.llmApiKey ? "••••" + config.llmApiKey.slice(-4) : "",
+        llmBaseUrl: config.llmBaseUrl,
+        llmModel: config.llmModel,
+      },
+    });
+  }
+
+  // --- Active meetings list ---
+
+  private async handleMeetingActiveList(agentId: string): Promise<void> {
+    const meetings: Array<{
+      meetingId: string;
+      title: string;
+      phase: string;
+      initiator: string;
+      participants: string[];
+      status: string;
+    }> = [];
+
+    for (const [meetingId, room] of this.activeMeetings) {
+      meetings.push({
+        meetingId,
+        title: room.title,
+        phase: room.getPhase(),
+        initiator: room.initiatorId,
+        participants: room.getParticipants(),
+        status: "active",
+      });
+    }
+
+    this.sessions.send(agentId, {
+      type: "meeting.active_list.result",
+      meetings,
+    });
   }
 
   // --- Agent process lifecycle ---
