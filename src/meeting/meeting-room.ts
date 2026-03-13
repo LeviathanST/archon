@@ -352,9 +352,9 @@ export class MeetingRoom {
     return true;
   }
 
-  private async advancePhase(): Promise<void> {
+  private async advancePhase(skipApprovalGate = false): Promise<void> {
     // If approval is required, pause and ask initiator before advancing
-    if (this.approvalRequired && !this.awaitingApproval) {
+    if (!skipApprovalGate && this.approvalRequired && !this.awaitingApproval) {
       this.awaitingApproval = true;
       this.currentSpeaker = null;
       this.speakingQueue = [];
@@ -418,8 +418,8 @@ export class MeetingRoom {
     if (agentId !== this.initiatorId) return false;
     if (!this.awaitingApproval) return false;
 
-    this.awaitingApproval = false;
-    await this.advancePhase();
+    // Skip the approval gate — this IS the approval
+    await this.advancePhase(/* skipApprovalGate */ true);
     return true;
   }
 
