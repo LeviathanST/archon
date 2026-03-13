@@ -87,6 +87,33 @@ async function seed(): Promise<void> {
     ])
     .onConflictDoNothing();
 
+  // --- Review agents for testing ---
+  await db
+    .insert(agents)
+    .values([
+      {
+        id: "code-reviewer",
+        displayName: "Code Reviewer",
+        workspacePath: "~/.archon/agents/code-reviewer",
+        modelConfig: { provider: "cli-claude", model: "sonnet" },
+      },
+      {
+        id: "ux-reviewer",
+        displayName: "UX Reviewer",
+        workspacePath: "~/.archon/agents/ux-reviewer",
+        modelConfig: { provider: "cli-claude", model: "sonnet" },
+      },
+    ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(agentDepartments)
+    .values([
+      { agentId: "code-reviewer", departmentId: "engineering", roleId: "lead_dev" },
+      { agentId: "ux-reviewer", departmentId: "engineering", roleId: "lead_dev" },
+    ])
+    .onConflictDoNothing();
+
   // --- CEO admin permissions ---
   const existingPerms = await db.query.permissions.findFirst({
     where: (p, { eq }) => eq(p.agentId, "ceo"),
