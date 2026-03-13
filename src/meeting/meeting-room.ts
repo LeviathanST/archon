@@ -28,6 +28,16 @@ export interface SendFn {
   (agentId: string, message: unknown): boolean;
 }
 
+export type PhaseEndReason =
+  | "budget_exhausted"
+  | "initiator_only"
+  | "no_targets"
+  | "all_passed"
+  | "manual"
+  | "approval"
+  | "all_voted"
+  | "all_acknowledged";
+
 export interface MeetingRoomOptions {
   id?: string;
   title: string;
@@ -224,7 +234,7 @@ export class MeetingRoom {
     // Check phase budget
     if (currentUsed + tokens > currentBudget) {
       // Budget exhausted → auto-advance
-      await this.advancePhase();
+      await this.advancePhase("budget_exhausted");
       return false;
     }
 
@@ -258,7 +268,7 @@ export class MeetingRoom {
 
     // After speaking in initiator_only phase, auto-advance to next phase
     if (this.currentPhaseHas("initiator_only")) {
-      await this.advancePhase();
+      await this.advancePhase("initiator_only");
     } else {
       // In open phases, start next relevance round
       this.currentSpeaker = null;
@@ -282,7 +292,7 @@ export class MeetingRoom {
     );
 
     if (checkTargets.length === 0) {
-      await this.advancePhase();
+      await this.advancePhase("no_targets");
       return;
     }
 
@@ -311,7 +321,7 @@ export class MeetingRoom {
       this.consecutivePasses++;
       if (this.consecutivePasses >= 2) {
         // Two consecutive all-pass rounds → auto-advance
-        await this.advancePhase();
+        await this.advancePhase("all_passed");
       }
       return;
     }
@@ -358,7 +368,10 @@ export class MeetingRoom {
     return true;
   }
 
-  private async advancePhase(skipApprovalGate = false): Promise<void> {
+  private async advancePhase(
+    reason: PhaseEndReason = "manual",
+    skipApprovalGate = false,
+  ): Promise<void> {
     // If approval is required, pause and ask initiator before advancing
     if (!skipApprovalGate && this.approvalRequired && !this.awaitingApproval) {
       this.awaitingApproval = true;
@@ -393,16 +406,22 @@ export class MeetingRoom {
 
     // Use methodology phases array for next phase
     if (this.phaseIndex >= this.methodology.phases.length - 1) {
-      await this.completeMeeting();
+      await this.completeMeeting(reason);
       return;
     }
 
+    const prevPhase = this.phase;
     this.phaseIndex++;
     this.phase = this.methodology.phases[this.phaseIndex].name;
     this.currentSpeaker = null;
     this.speakingQueue = [];
     this.consecutivePasses = 0;
     this.awaitingApproval = false;
+
+    logger.info(
+      { meetingId: this.id, from: prevPhase, to: this.phase, reason },
+      "Phase advanced",
+    );
 
     // Update DB
     await db
@@ -425,7 +444,7 @@ export class MeetingRoom {
     if (!this.awaitingApproval) return false;
 
     // Skip the approval gate — this IS the approval
-    await this.advancePhase(/* skipApprovalGate */ true);
+    await this.advancePhase("approval", /* skipApprovalGate */ true);
     return true;
   }
 
@@ -493,7 +512,7 @@ export class MeetingRoom {
       (p) => p.votes.length >= this.joined.size
     );
     if (allVoted) {
-      await this.advancePhase();
+      await this.advancePhase("all_voted");
     }
 
     return true;
@@ -546,7 +565,7 @@ export class MeetingRoom {
     // Check if all items acknowledged → complete
     const allAcked = this.actionItems.every((i) => i.acknowledged);
     if (allAcked && this.actionItems.length > 0) {
-      await this.advancePhase(); // → completed
+      await this.advancePhase("all_acknowledged");
     }
 
     return true;
@@ -554,7 +573,7 @@ export class MeetingRoom {
 
   // --- Completion & cancellation ---
 
-  private async completeMeeting(): Promise<void> {
+  private async completeMeeting(reason?: PhaseEndReason): Promise<void> {
     this.status = "completed";
 
     // Build decisions from approved proposals
@@ -600,12 +619,16 @@ export class MeetingRoom {
       .where(eq(meetings.id, this.id));
 
     // Broadcast completion
+    const totalBudget = [...this.phaseBudgets.values()].reduce((a, b) => a + b, 0);
     const out: MeetingCompletedOut = {
       type: "meeting.completed",
       meetingId: this.id,
       decisions,
       actionItems: this.actionItems,
       summary: summary ?? undefined,
+      reason,
+      finalPhase: this.phase,
+      budgetRemaining: totalBudget - this.tokensUsed,
     };
     this.broadcastToParticipants(out);
 

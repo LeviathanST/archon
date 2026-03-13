@@ -201,6 +201,9 @@ export interface MeetingCompletedOut {
   decisions: unknown[];
   actionItems: unknown[];
   summary?: string;
+  reason?: string;
+  finalPhase?: string;
+  budgetRemaining?: number;
 }
 
 export interface MeetingAwaitingApprovalOut {
