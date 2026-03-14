@@ -276,6 +276,9 @@ export class MeetingRoom {
   }
 
   private async startRelevanceRound(): Promise<void> {
+    // Guard: don't start rounds on completed/cancelled meetings (e.g., from delayed setTimeout)
+    if (this.status !== "active") return;
+
     // Send relevance check to all joined participants (except initiator and last speaker)
     // Initiator is the facilitator — they don't participate in relevance rounds
     const checkTargets = [...this.joined].filter(
@@ -310,10 +313,8 @@ export class MeetingRoom {
     }
 
     if (reachable.length === 0) {
-      this.consecutivePasses++;
-      if (this.consecutivePasses >= 2) {
-        await this.advancePhase("all_passed");
-      }
+      // All agents unreachable — advance immediately (no one to wait for)
+      await this.advancePhase("all_passed");
       return;
     }
 
