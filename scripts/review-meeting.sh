@@ -71,6 +71,34 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# ── Preflight checks ─────────────────────────────────────────────────────────
+
+if ! git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
+  echo -e "${RED}ERROR: Not a git repository. Run from a git project or use --project <path>${NC}"
+  exit 1
+fi
+
+# Check hub is reachable — parse host:port from URL
+HUB_HOSTPORT="${HUB_URL#ws://}"
+HUB_HOSTPORT="${HUB_HOSTPORT#wss://}"
+HUB_HOSTPORT="${HUB_HOSTPORT%%/*}"  # strip trailing path
+if [[ "$HUB_HOSTPORT" == *:* ]]; then
+  HUB_HOST="${HUB_HOSTPORT%%:*}"
+  HUB_PORT="${HUB_HOSTPORT##*:}"
+else
+  HUB_HOST="$HUB_HOSTPORT"
+  HUB_PORT=80
+fi
+if command -v nc &>/dev/null; then
+  if ! nc -z -w 2 "$HUB_HOST" "$HUB_PORT" &>/dev/null; then
+    echo -e "${RED}ERROR: Hub not reachable at ${HUB_URL}. Start the hub: cd ~/archon && npm run dev${NC}"
+    exit 1
+  fi
+elif ! (echo >/dev/tcp/"$HUB_HOST"/"$HUB_PORT") &>/dev/null 2>&1; then
+  echo -e "${RED}ERROR: Hub not reachable at ${HUB_URL}. Start the hub: cd ~/archon && npm run dev${NC}"
+  exit 1
+fi
+
 cd "$PROJECT_DIR"
 
 # ── Auto-detect agents if not specified ──────────────────────────────────────
@@ -139,6 +167,8 @@ echo ""
 # ── Step 2: Run checks (if available and not skipped) ────────────────────────
 
 CHECK_RESULTS=""
+REVIEW_TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$REVIEW_TMPDIR"' EXIT
 
 if ! $SKIP_CHECKS; then
   echo -e "${BLUE}[2/3] Running automated checks...${NC}"
@@ -157,7 +187,7 @@ if ! $SKIP_CHECKS; then
     fi
 
     if [ -n "$TEST_CMD" ]; then
-      if $TEST_CMD 2>&1 > /tmp/review-meeting-tests.txt; then
+      if $TEST_CMD > "$REVIEW_TMPDIR/tests.txt" 2>&1; then
         echo -e "  ${GREEN}Tests passed${NC}"
         CHECK_RESULTS="${CHECK_RESULTS}Tests: PASSED\n"
       else
@@ -171,7 +201,7 @@ if ! $SKIP_CHECKS; then
 
   # Type check — try tsc if available
   if [ -f "tsconfig.json" ] && command -v npx &>/dev/null; then
-    if npx tsc --noEmit 2>&1 > /tmp/review-meeting-tsc.txt; then
+    if npx tsc --noEmit > "$REVIEW_TMPDIR/tsc.txt" 2>&1; then
       echo -e "  ${GREEN}Type check passed${NC}"
       CHECK_RESULTS="${CHECK_RESULTS}Type check: PASSED\n"
     else
@@ -182,7 +212,7 @@ if ! $SKIP_CHECKS; then
 
   # Lint — try if configured
   if [ -f "package.json" ] && grep -q '"lint"' package.json 2>/dev/null; then
-    if npm run lint --silent 2>&1 > /tmp/review-meeting-lint.txt; then
+    if npm run lint --silent > "$REVIEW_TMPDIR/lint.txt" 2>&1; then
       echo -e "  ${GREEN}Lint passed${NC}"
       CHECK_RESULTS="${CHECK_RESULTS}Lint: PASSED\n"
     else
@@ -206,7 +236,7 @@ echo -e "${BLUE}[3/3] Creating review meeting on Archon hub...${NC}"
 echo ""
 
 # Write full diff to temp file (agents can read it if needed)
-DIFF_FILE="/tmp/archon-review-diff.patch"
+DIFF_FILE="$REVIEW_TMPDIR/diff.patch"
 echo "$DIFF" > "$DIFF_FILE"
 DIFF_LINES=$(echo "$DIFF" | wc -l)
 
