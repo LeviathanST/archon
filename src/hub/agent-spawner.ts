@@ -143,15 +143,24 @@ export class AgentSpawner {
 
     if (config.model) args.push("--model", config.model);
     if (config.baseUrl) args.push("--base-url", config.baseUrl);
-    if (config.apiKey) args.push("--api-key", config.apiKey);
 
     try {
       // Use tsx from node_modules/.bin
       const tsxPath = resolve(process.cwd(), "node_modules/.bin/tsx");
 
+      // Minimal env for spawned agents — don't leak hub secrets (DATABASE_URL, API keys)
+      const env: Record<string, string | undefined> = {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        NODE_ENV: process.env.NODE_ENV,
+        TERM: process.env.TERM,
+        LANG: process.env.LANG,
+      };
+      if (config.apiKey) env.AGENT_API_KEY = config.apiKey;
+
       const proc = spawn(tsxPath, args, {
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env },
+        env,
         detached: false,
       });
 

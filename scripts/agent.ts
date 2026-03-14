@@ -65,7 +65,7 @@ function parseArgs(): {
     provider,
     model: get("--model", ""),
     baseUrl: get("--base-url", process.env.OPENAI_BASE_URL ?? "https://openrouter.ai/api/v1"),
-    apiKey: get("--api-key", process.env.OPENROUTER_API_KEY ?? process.env.OPENAI_API_KEY ?? ""),
+    apiKey: get("--api-key", process.env.AGENT_API_KEY ?? process.env.OPENROUTER_API_KEY ?? process.env.OPENAI_API_KEY ?? ""),
     hub: get("--hub", "ws://localhost:9500"),
     persona: get("--persona", ""),
   };
@@ -135,12 +135,13 @@ function runCli(command: string, args: string[], stdin?: string): Promise<string
 
 async function chatViaClaude(userMessage: string): Promise<string> {
   const fullPrompt = `${systemPrompt}\n\n---\n\n${userMessage}`;
-  // Use --print + stdin (not -p) to avoid hanging in nested sessions.
-  // Pattern from Claw-Empire: prompt via stdin, --print for non-interactive output.
+  // Pass prompt via stdin to avoid OS ARG_MAX limit on large prompts
+  // SECURITY: --dangerously-skip-permissions is dev-only. In production,
+  // use scoped permissions or remove this flag entirely.
   const args = [
     "--print",
     "--no-session-persistence",
-    "--dangerously-skip-permissions",
+    ...(process.env.NODE_ENV === "production" ? [] : ["--dangerously-skip-permissions"]),
   ];
   if (config.model) {
     args.push("--model", config.model);
