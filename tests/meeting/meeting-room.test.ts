@@ -509,12 +509,13 @@ describe("MeetingRoom", () => {
       send: mockSend,
     });
 
-    // 30% of 10_000 = 3_000 for updates
-    expect(room.getPhaseBudget("updates")).toBe(3_000);
-    // 50% of 10_000 = 5_000 for blockers
-    expect(room.getPhaseBudget("blockers")).toBe(5_000);
-    // 20% of 10_000 = 2_000 for actions
-    expect(room.getPhaseBudget("actions")).toBe(2_000);
+    // Budgets include TOKEN_SAFETY_MARGIN (0.6) to compensate for chars/4 underestimate
+    // 30% of 10_000 * 0.6 = 1_800 for updates
+    expect(room.getPhaseBudget("updates")).toBe(1_800);
+    // 50% of 10_000 * 0.6 = 3_000 for blockers
+    expect(room.getPhaseBudget("blockers")).toBe(3_000);
+    // 20% of 10_000 * 0.6 = 1_200 for actions
+    expect(room.getPhaseBudget("actions")).toBe(1_200);
   });
 
   it("should enforce capabilities from custom methodology", async () => {
