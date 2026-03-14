@@ -22,21 +22,12 @@ import {
   type MeetingCompletedOut,
   type MeetingCancelledOut,
   type MeetingAwaitingApprovalOut,
+  type PhaseEndReason,
 } from "./types.js";
 
 export interface SendFn {
   (agentId: string, message: unknown): boolean;
 }
-
-export type PhaseEndReason =
-  | "budget_exhausted"
-  | "initiator_only"
-  | "no_targets"
-  | "all_passed"
-  | "manual"
-  | "approval"
-  | "all_voted"
-  | "all_acknowledged";
 
 export interface MeetingRoomOptions {
   id?: string;
@@ -320,7 +311,7 @@ export class MeetingRoom {
 
     if (reachable.length === 0) {
       this.consecutivePasses++;
-      if (this.consecutivePasses >= 1) {
+      if (this.consecutivePasses >= 2) {
         await this.advancePhase("all_passed");
       }
       return;
@@ -345,32 +336,31 @@ export class MeetingRoom {
   }
 
   private async giveNextTurn(): Promise<void> {
-    if (this.speakingQueue.length === 0) {
-      // Queue exhausted → new relevance round
-      await this.startRelevanceRound();
-      return;
-    }
+    // Loop instead of recursion to avoid unbounded stack growth
+    // when multiple queued agents are disconnected
+    while (this.speakingQueue.length > 0) {
+      const next = this.speakingQueue.shift()!;
+      this.currentSpeaker = next;
 
-    const next = this.speakingQueue.shift()!;
-    this.currentSpeaker = next;
+      const currentUsed = this.phaseTokensUsed.get(this.phase) ?? 0;
+      const currentBudget = this.phaseBudgets.get(this.phase) ?? 0;
 
-    const currentUsed = this.phaseTokensUsed.get(this.phase) ?? 0;
-    const currentBudget = this.phaseBudgets.get(this.phase) ?? 0;
+      const turn: MeetingYourTurnOut = {
+        type: "meeting.your_turn",
+        meetingId: this.id,
+        phase: this.phase,
+        budgetRemaining: currentBudget - currentUsed,
+      };
 
-    const turn: MeetingYourTurnOut = {
-      type: "meeting.your_turn",
-      meetingId: this.id,
-      phase: this.phase,
-      budgetRemaining: currentBudget - currentUsed,
-    };
-    const delivered = this.send(next, turn);
+      if (this.send(next, turn)) return; // delivered, wait for agent to speak
 
-    // Agent disconnected — skip their turn
-    if (!delivered) {
+      // Agent disconnected — skip their turn, try next
       logger.warn({ meetingId: this.id, agentId: next }, "Agent disconnected, skipping turn");
       this.currentSpeaker = null;
-      await this.giveNextTurn();
     }
+
+    // Queue exhausted → new relevance round
+    await this.startRelevanceRound();
   }
 
   // --- Phase advancement ---
