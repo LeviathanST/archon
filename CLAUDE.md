@@ -80,17 +80,61 @@ TypeScript (ESM, `"module": "NodeNext"`), ws (WebSocket), drizzle-orm + postgres
 
 ## Git workflow
 
+### Principles
+
 - **Main branch**: `main` — protected, never push directly
 - **Never force push** to `main`
-- **All work goes through feature branches** — create a branch, commit there, merge via PR
+- **Small PRs**: Target under 200 lines of diff. One logical change per PR. If a PR touches multiple unrelated areas, split it
+- **Merge fast**: PRs should be reviewable and mergeable within a day. Don't let branches grow stale
+
+### Branch strategy (trunk-based)
+
+All work goes through short-lived feature branches off `main`:
+
+```
+main ← feat/token-safety (1-3 commits, merge in hours)
+main ← feat/phase-reasons (1-3 commits, merge in hours)
+```
+
 - **Branch naming**: `<type>/<short-description>`
-  - `feat/meeting-room` — new feature
+  - `feat/token-safety-margin` — new feature
   - `fix/auth-token-validation` — bug fix
   - `refactor/session-cleanup` — refactoring
   - `test/hub-integration` — adding tests
   - `docs/api-protocol` — documentation
   - `chore/deps-update` — maintenance
-- **Commit messages**: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) format
+
+### Stacked PRs (when changes depend on each other)
+
+When PR 2 needs PR 1's code, stack them:
+
+```
+main ← PR1: feat/review-scope (adds ReviewScope type)
+         ← PR2: feat/review-cycle (uses ReviewScope, branches off PR1)
+```
+
+When PR1 merges into main, rebase PR2 onto main:
+
+```bash
+git checkout feat/review-cycle
+git rebase --onto main feat/review-scope
+```
+
+Rules:
+- Each PR in the stack must be independently reviewable
+- Don't stack more than 3 deep — if you need more, the feature is too big
+- Rebase with `--update-refs` (Git 2.38+) to auto-update intermediate branches
+
+### Handling conflicts
+
+- **Prevention**: Small PRs touching different files rarely conflict
+- **When rebasing after base PR merges**: `git rebase --onto main <old-base> <branch>`
+- **When two PRs touch the same file**: Merge the simpler one first, rebase the other
+- **Never resolve conflicts by deleting someone else's work** — understand both changes first
+
+### Commits
+
+- **[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)** format
   - `feat: add meeting phase state machine`
   - `fix: validate token before session create`
   - `refactor(hub): simplify session cleanup`
@@ -99,10 +143,11 @@ TypeScript (ESM, `"module": "NodeNext"`), ws (WebSocket), drizzle-orm + postgres
   - `chore: bump drizzle-orm to 0.40`
   - Use `!` for breaking changes: `feat!: redesign auth protocol`
   - Body/footer optional, use for context when needed
-- **One branch per milestone or logical unit** — don't mix unrelated changes
+- **One logical change per commit** — don't mix unrelated changes in a single commit
+- **One logical change per PR** — don't mix unrelated changes in a single PR
 
 ## Key docs
 
-- `PLAN.md` — Full architecture, schema, protocol spec, all 5 milestones
+- `PLAN.md` — Full architecture, schema, protocol spec, all 7 milestones
 - `docs/CHANGELOG.md` — Running log of completed work
 - `docs/milestones/01-05` — Per-milestone task tracking
