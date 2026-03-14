@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+export type PhaseEndReason =
+  | "budget_exhausted"
+  | "initiator_only"
+  | "no_targets"
+  | "all_passed"
+  | "manual"
+  | "approval"
+  | "all_voted"
+  | "all_acknowledged";
+
 // --- Phase & Relevance enums ---
 
 /** Phase is now a free-form string — methodology defines the valid phases. */
@@ -201,7 +211,7 @@ export interface MeetingCompletedOut {
   decisions: unknown[];
   actionItems: unknown[];
   summary?: string;
-  reason?: string;
+  reason?: PhaseEndReason;
   finalPhase?: string;
   budgetRemaining?: number;
 }
