@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { meetings, meetingParticipants, meetingMessages } from "../db/schema.js";
 import { logger } from "../utils/logger.js";
@@ -177,9 +177,10 @@ export class MeetingRoom {
     // Update DB
     db.update(meetingParticipants)
       .set({ joinedAt: new Date() })
-      .where(
-        eq(meetingParticipants.meetingId, this.id)
-      )
+      .where(and(
+        eq(meetingParticipants.meetingId, this.id),
+        eq(meetingParticipants.agentId, agentId),
+      ))
       .then(() => {})
       .catch((e) => logger.error({ error: e }, "Failed to update participant join"));
 
@@ -270,9 +271,10 @@ export class MeetingRoom {
   }
 
   private async startRelevanceRound(): Promise<void> {
-    // Send relevance check to all joined participants (except last speaker)
+    // Send relevance check to all joined participants (except initiator and last speaker)
+    // Initiator is the facilitator — they don't participate in relevance rounds
     const checkTargets = [...this.joined].filter(
-      (id) => id !== this.lastMessage?.agentId
+      (id) => id !== this.initiatorId && id !== this.lastMessage?.agentId
     );
 
     if (checkTargets.length === 0) {
@@ -303,8 +305,8 @@ export class MeetingRoom {
     if (queue.length === 0) {
       // All passed → increment consecutive passes
       this.consecutivePasses++;
-      if (this.consecutivePasses >= 1) {
-        // All agents passed → auto-advance
+      if (this.consecutivePasses >= 2) {
+        // Two consecutive all-pass rounds → auto-advance
         await this.advancePhase();
       }
       return;
@@ -352,9 +354,9 @@ export class MeetingRoom {
     return true;
   }
 
-  private async advancePhase(): Promise<void> {
+  private async advancePhase(skipApprovalGate = false): Promise<void> {
     // If approval is required, pause and ask initiator before advancing
-    if (this.approvalRequired && !this.awaitingApproval) {
+    if (!skipApprovalGate && this.approvalRequired && !this.awaitingApproval) {
       this.awaitingApproval = true;
       this.currentSpeaker = null;
       this.speakingQueue = [];
@@ -418,8 +420,8 @@ export class MeetingRoom {
     if (agentId !== this.initiatorId) return false;
     if (!this.awaitingApproval) return false;
 
-    this.awaitingApproval = false;
-    await this.advancePhase();
+    // Skip the approval gate — this IS the approval
+    await this.advancePhase(/* skipApprovalGate */ true);
     return true;
   }
 

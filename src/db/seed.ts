@@ -103,6 +103,18 @@ async function seed(): Promise<void> {
         workspacePath: "~/.archon/agents/ux-reviewer",
         modelConfig: { provider: "cli-claude", model: "sonnet" },
       },
+      {
+        id: "tech-lead",
+        displayName: "Tech Lead",
+        workspacePath: "~/.archon/agents/tech-lead",
+        modelConfig: { provider: "cli-claude", model: "sonnet" },
+      },
+      {
+        id: "sherlock",
+        displayName: "Sherlock",
+        workspacePath: "~/.archon/agents/sherlock",
+        modelConfig: { provider: "cli-claude", model: "sonnet" },
+      },
     ])
     .onConflictDoNothing();
 
@@ -111,6 +123,8 @@ async function seed(): Promise<void> {
     .values([
       { agentId: "code-reviewer", departmentId: "engineering", roleId: "lead_dev" },
       { agentId: "ux-reviewer", departmentId: "engineering", roleId: "lead_dev" },
+      { agentId: "tech-lead", departmentId: "engineering", roleId: "lead_dev" },
+      { agentId: "sherlock", departmentId: "engineering", roleId: "lead_dev" },
     ])
     .onConflictDoNothing();
 

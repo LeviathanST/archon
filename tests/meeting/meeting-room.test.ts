@@ -3,6 +3,8 @@ import { eq } from "drizzle-orm";
 import { db, closeConnection } from "../../src/db/connection.js";
 import { agents, meetings, meetingParticipants, meetingMessages } from "../../src/db/schema.js";
 import { MeetingRoom } from "../../src/meeting/meeting-room.js";
+import type { Methodology } from "../../src/meeting/methodology.js";
+import type { PhaseCapability } from "../../src/meeting/methodology.js";
 
 // Collect messages sent to agents
 type SentMessage = { agentId: string; message: unknown };
@@ -47,7 +49,8 @@ describe("MeetingRoom", () => {
     const testMeetingIds = [
       "test-meeting-1", "test-meeting-budget", "present-test",
       "broadcast-test", "token-test", "decide-test", "complete-test",
-      "persist-jsonb-test",
+      "persist-jsonb-test", "custom-method-test", "custom-budget-test",
+      "approval-test", "custom-proposals-test",
     ];
     for (const id of testMeetingIds) {
       await db.delete(meetingMessages).where(eq(meetingMessages.meetingId, id));
@@ -436,5 +439,153 @@ describe("MeetingRoom", () => {
 
     expect(room.getStatus()).toBe("completed");
     expect(await room.speak(INITIATOR, "Too late")).toBe(false);
+  });
+
+  // --- Custom methodology tests ---
+
+  const STANDUP_METHODOLOGY: Methodology = {
+    id: "standup",
+    name: "Daily Standup",
+    phases: [
+      {
+        name: "updates",
+        budget: 0.3,
+        description: "Each participant shares status",
+        capabilities: new Set<PhaseCapability>(["initiator_only"]),
+      },
+      {
+        name: "blockers",
+        budget: 0.5,
+        description: "Discuss blockers",
+        capabilities: new Set<PhaseCapability>(["open_discussion"]),
+      },
+      {
+        name: "actions",
+        budget: 0.2,
+        description: "Assign unblocking tasks",
+        capabilities: new Set<PhaseCapability>(["open_discussion", "assignments"]),
+      },
+    ],
+    rules: ["Keep updates short"],
+  };
+
+  it("should use custom methodology phases", async () => {
+    sent = [];
+    const room = new MeetingRoom({
+      id: "custom-method-test",
+      title: "Standup",
+      initiatorId: INITIATOR,
+      invitees: [AGENT_A],
+      methodology: STANDUP_METHODOLOGY,
+      send: mockSend,
+    });
+    await room.persist();
+    room.join(INITIATOR);
+    room.join(AGENT_A);
+
+    // Starts on first methodology phase
+    expect(room.getPhase()).toBe("updates");
+    expect(room.getMethodology().id).toBe("standup");
+
+    // Advance through custom phases
+    await room.advance(INITIATOR); // → blockers
+    expect(room.getPhase()).toBe("blockers");
+
+    await room.advance(INITIATOR); // → actions
+    expect(room.getPhase()).toBe("actions");
+
+    await room.advance(INITIATOR); // → completed
+    expect(room.getStatus()).toBe("completed");
+  });
+
+  it("should allocate budgets from methodology percentages", () => {
+    const room = new MeetingRoom({
+      id: "custom-budget-test",
+      title: "Budget Allocation",
+      initiatorId: INITIATOR,
+      invitees: [AGENT_A],
+      tokenBudget: 10_000,
+      methodology: STANDUP_METHODOLOGY,
+      send: mockSend,
+    });
+
+    // 30% of 10_000 = 3_000 for updates
+    expect(room.getPhaseBudget("updates")).toBe(3_000);
+    // 50% of 10_000 = 5_000 for blockers
+    expect(room.getPhaseBudget("blockers")).toBe(5_000);
+    // 20% of 10_000 = 2_000 for actions
+    expect(room.getPhaseBudget("actions")).toBe(2_000);
+  });
+
+  it("should enforce capabilities from custom methodology", async () => {
+    sent = [];
+    const room = new MeetingRoom({
+      id: "custom-proposals-test",
+      title: "Capability Test",
+      initiatorId: INITIATOR,
+      invitees: [AGENT_A],
+      methodology: STANDUP_METHODOLOGY,
+      send: mockSend,
+    });
+    await room.persist();
+    room.join(INITIATOR);
+    room.join(AGENT_A);
+
+    // In "updates" (initiator_only) — non-initiator can't speak
+    expect(await room.speak(AGENT_A, "I want to talk")).toBe(false);
+
+    // Proposals not available (no phase has "proposals" in standup)
+    expect(await room.propose(AGENT_A, "Bad timing")).toBe(false);
+
+    // Advance to "actions" (has assignments capability)
+    await room.advance(INITIATOR); // → blockers
+    await room.advance(INITIATOR); // → actions
+    expect(room.getPhase()).toBe("actions");
+
+    // Can assign tasks in actions phase
+    expect(await room.assignTask(INITIATOR, "Fix the build", AGENT_A)).toBe(true);
+    expect(room.getActionItems()).toHaveLength(1);
+
+    // Still can't propose (actions has no proposals capability)
+    expect(await room.propose(AGENT_A, "No proposals here")).toBe(false);
+  });
+
+  it("should pause for approval when approvalRequired is true", async () => {
+    sent = [];
+    const room = new MeetingRoom({
+      id: "approval-test",
+      title: "Approval Test",
+      initiatorId: INITIATOR,
+      invitees: [AGENT_A],
+      approvalRequired: true,
+      send: mockSend,
+    });
+    await room.persist();
+    room.join(INITIATOR);
+    room.join(AGENT_A);
+
+    // Advance should trigger approval request, not immediately advance
+    await room.advance(INITIATOR);
+
+    // Should broadcast awaiting_approval
+    const approvalMsgs = messagesOfType("meeting.awaiting_approval");
+    expect(approvalMsgs.length).toBeGreaterThan(0);
+    const approvalMsg = approvalMsgs[0].message as {
+      type: string;
+      currentPhase: string;
+      nextPhase: string;
+    };
+    expect(approvalMsg.currentPhase).toBe("present");
+    expect(approvalMsg.nextPhase).toBe("discuss");
+
+    // Phase should NOT have changed yet
+    expect(room.getPhase()).toBe("present");
+
+    // Only initiator can approve
+    expect(await room.approve(AGENT_A)).toBe(false);
+    expect(await room.approve(INITIATOR)).toBe(true);
+
+    // Now it advanced
+    expect(room.getPhase()).toBe("discuss");
   });
 });
