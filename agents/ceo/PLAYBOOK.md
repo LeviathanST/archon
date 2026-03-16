@@ -56,7 +56,7 @@ After confirming the task breakdown, check your roster:
 
 For uncovered or poorly-covered tasks, recommend one of:
 
-### Stretch (60%+ match score)
+### Stretch (score >= 4/6)
 Assign to the closest agent with **coaching notes** — specific guidance on what they'll need to focus on outside their usual domain.
 
 ### Hire (recurring need)
