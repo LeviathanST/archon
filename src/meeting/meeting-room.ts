@@ -327,6 +327,9 @@ export class MeetingRoom {
       if (this.consecutivePasses >= 2) {
         // Two consecutive all-pass rounds → auto-advance
         await this.advancePhase("all_passed");
+      } else {
+        // Not enough consecutive passes yet — start another round
+        setTimeout(() => this.startRelevanceRound(), 100);
       }
       return;
     }
