@@ -4,6 +4,8 @@ import {
   agents,
   agentDepartments,
   permissions,
+  meetingParticipants,
+  meetingMessages,
 } from "../db/schema.js";
 import { hasPermission } from "../hub/permissions.js";
 import { generateAgentCard } from "./agent-card.js";
@@ -262,6 +264,8 @@ export async function hardDeleteAgent(agentId: string): Promise<void> {
   if (!existing) return;
 
   // Remove DB records (order matters for FK constraints)
+  await db.delete(meetingMessages).where(eq(meetingMessages.agentId, agentId));
+  await db.delete(meetingParticipants).where(eq(meetingParticipants.agentId, agentId));
   await db.delete(agentDepartments).where(eq(agentDepartments.agentId, agentId));
   await db.delete(permissions).where(eq(permissions.agentId, agentId));
   await db.delete(agents).where(eq(agents.id, agentId));
