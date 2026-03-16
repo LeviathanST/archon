@@ -177,16 +177,18 @@ ws.on("message", async (raw) => {
 });
 
 ws.on("error", (err) => {
-  console.error(`Connection error: ${(err as Error).message}`);
+  console.error(`Connection error: ${String(err)}`);
   process.exit(1);
 });
 
 process.on("uncaughtException", (err) => {
-  console.error(`Uncaught exception: ${err.message}\n${err.stack}`);
+  console.error(`Uncaught exception: ${String(err)}`);
+  process.exit(1);
 });
 
 process.on("unhandledRejection", (err) => {
-  console.error(`Unhandled rejection: ${err}`);
+  console.error(`Unhandled rejection: ${String(err)}`);
+  process.exit(1);
 });
 
 ws.on("close", (code, reason) => {
