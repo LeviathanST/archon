@@ -90,6 +90,10 @@ function loadIdentity(): string {
     if (existsSync(identityPath)) {
       parts.push(readFileSync(identityPath, "utf-8"));
     }
+    const playbookPath = resolve(dir, "PLAYBOOK.md");
+    if (existsSync(playbookPath)) {
+      parts.push(readFileSync(playbookPath, "utf-8"));
+    }
     if (parts.length > 0) break; // use first found
   }
 
