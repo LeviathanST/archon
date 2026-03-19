@@ -12,6 +12,7 @@
 import { z } from "zod";
 import * as yaml from "js-yaml";
 import { createHash } from "crypto";
+import { realpathSync } from "fs";
 import { readdir, open } from "fs/promises";
 import { join, basename } from "path";
 import { homedir } from "os";
@@ -110,10 +111,20 @@ export async function loadSkills(agentId: string): Promise<Skill[]> {
   for (const file of mdFiles) {
     const filePath = join(skillsDir, file);
 
-    // Open read-only (O_RDONLY)
+    // Open read-only (O_RDONLY). realpathSync resolves symlinks and throws
+    // on dangling symlinks — both must be handled in the same try/catch.
     let rawContent: string;
     try {
-      const fd = await open(filePath, "r");
+      const resolvedPath = realpathSync(filePath);
+      if (!resolvedPath.startsWith(skillsDir)) {
+        logger.warn(
+          { filePath, resolvedPath, skillsDir },
+          "Skill file resolves outside skills dir (symlink escape), skipping"
+        );
+        continue;
+      }
+
+      const fd = await open(resolvedPath, "r");
       try {
         const buffer = await fd.readFile("utf-8");
         rawContent = buffer;
@@ -121,7 +132,11 @@ export async function loadSkills(agentId: string): Promise<Skill[]> {
         await fd.close();
       }
     } catch (err) {
-      logger.warn({ err, filePath }, "Failed to read skill file, skipping");
+      if (err instanceof Error) {
+        logger.warn({ err: err.message, filePath }, "Failed to read skill file, skipping");
+      } else {
+        logger.warn({ err: String(err), filePath }, "Failed to read skill file, skipping");
+      }
       continue;
     }
 

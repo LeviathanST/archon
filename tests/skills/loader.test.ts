@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { mkdirSync, writeFileSync, rmSync, existsSync, chmodSync } from "fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, chmodSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import {
@@ -127,6 +127,15 @@ Priority body.
     expect(skill).toBeDefined();
     expect(skill!.frontmatter.priority).toBe(5);
     expect(typeof skill!.frontmatter.priority).toBe("number");
+  });
+
+  it("should skip dangling symlinks without throwing", async () => {
+    // Create a symlink pointing to a non-existent target — dangling symlink
+    const symlinkPath = join(SKILLS_DIR, "dangling.md");
+    symlinkSync("/nonexistent/target/skill.md", symlinkPath);
+
+    // loadSkills must return an empty array (symlink skipped) and not throw
+    await expect(loadSkills(TEST_AGENT)).resolves.toEqual([]);
   });
 });
 
