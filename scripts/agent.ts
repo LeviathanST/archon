@@ -76,7 +76,7 @@ const config = parseArgs();
 // --- Load identity files if available ---
 function loadIdentity(): string {
   const workspaceDir = resolve(homedir(), `.archon/agents/${config.id}`);
-  const repoDir = resolve(process.cwd(), `agents/${config.id}`);
+  const repoDir = resolve(process.cwd(), `defaults/agents/${config.id}`);
 
   let parts: string[] = [];
 
