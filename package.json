@@ -1,6 +1,6 @@
 {
   "name": "archon",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agent Company Platform — organize AI agents like a company",
   "type": "module",
   "scripts": {
