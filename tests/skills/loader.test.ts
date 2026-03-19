@@ -95,7 +95,7 @@ Missing description and triggers.
     expect(skills).toEqual([]);
   });
 
-  it("should default priority to 0 when not specified", async () => {
+  it("should leave priority undefined when not specified", async () => {
     writeSkill("nopri.md", `---
 name: no-priority
 description: A skill without priority
@@ -108,7 +108,25 @@ Body here.
     const skills = await loadSkills(TEST_AGENT);
     const noPri = skills.find((s) => s.frontmatter.name === "no-priority");
     expect(noPri).toBeDefined();
-    expect(noPri!.frontmatter.priority).toBe(0);
+    expect(noPri!.frontmatter.priority).toBeUndefined();
+  });
+
+  it("should parse priority as a number (not a string) via CORE_SCHEMA", async () => {
+    writeSkill("priority.md", `---
+name: priority-skill
+description: A skill with explicit priority
+triggers: [priority]
+priority: 5
+---
+
+Priority body.
+`);
+
+    const skills = await loadSkills(TEST_AGENT);
+    const skill = skills.find((s) => s.frontmatter.name === "priority-skill");
+    expect(skill).toBeDefined();
+    expect(skill!.frontmatter.priority).toBe(5);
+    expect(typeof skill!.frontmatter.priority).toBe("number");
   });
 });
 

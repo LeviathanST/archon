@@ -10,6 +10,7 @@
  */
 
 import { z } from "zod";
+import * as yaml from "js-yaml";
 import { createHash } from "crypto";
 import { readdir, open } from "fs/promises";
 import { join, basename } from "path";
@@ -23,7 +24,7 @@ export const SkillFrontmatterSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
   triggers: z.array(z.string().min(1)),
-  priority: z.number().default(0),
+  priority: z.number().int().min(0).max(10).optional(),
 });
 
 export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>;
@@ -65,39 +66,24 @@ export function hashContent(content: string): string {
 // --- Frontmatter parser ---
 
 /**
- * Parse YAML-style frontmatter from a markdown file.
+ * Parse YAML frontmatter from a markdown file using js-yaml with CORE_SCHEMA.
+ * CORE_SCHEMA (not FAILSAFE_SCHEMA) is required so numeric values like
+ * `priority: 5` are parsed as numbers, not strings.
  * Expects --- delimiters at start and end of frontmatter block.
  */
 function parseFrontmatter(content: string): { meta: Record<string, unknown>; body: string } | null {
   const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return null;
 
-  const rawMeta = match[1];
+  const rawYaml = match[1];
   const body = match[2];
 
-  // Simple YAML-like parser for flat key-value pairs
-  const meta: Record<string, unknown> = {};
-  for (const line of rawMeta.split("\n")) {
-    const kvMatch = line.match(/^(\w+):\s*(.+)$/);
-    if (!kvMatch) continue;
-
-    const [, key, value] = kvMatch;
-    // Handle arrays: [item1, item2]
-    const arrayMatch = value.match(/^\[(.+)\]$/);
-    if (arrayMatch) {
-      meta[key] = arrayMatch[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, ""));
-    } else {
-      // Handle numbers
-      const num = Number(value);
-      if (!isNaN(num) && value.trim() !== "") {
-        meta[key] = num;
-      } else {
-        meta[key] = value.replace(/^["']|["']$/g, "").trim();
-      }
-    }
+  const parsed = yaml.load(rawYaml, { schema: yaml.CORE_SCHEMA });
+  if (parsed === null || parsed === undefined || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
   }
 
-  return { meta, body };
+  return { meta: parsed as Record<string, unknown>, body };
 }
 
 // --- Loader ---
@@ -199,7 +185,7 @@ export function matchSkill(task: AgentTask, skills: Skill[]): Skill | null {
 
     if (overlap === 0) continue;
 
-    const priority = skill.frontmatter.priority;
+    const priority = skill.frontmatter.priority ?? 0;
 
     // Higher priority wins. On equal priority, higher overlap wins.
     // On equal both, alphabetical filename wins (skills array is pre-sorted).
