@@ -65,6 +65,32 @@ Defines the agent's role and capabilities:
 
 Only the CEO has one currently. Defines coordination workflows — how to analyze missions, check team coverage, hire agents, and orchestrate meetings.
 
+### Skills (Optional)
+
+Agents can have a `skills/` directory with markdown skill files. Each skill has frontmatter (name, description, triggers, priority) and a body with instructions. Skills are loaded on demand — only frontmatter is read at startup (~30-50 tokens each), and the full body is injected only when a task matches the skill's trigger keywords.
+
+```
+~/.archon/agents/sherlock/skills/
+├── threat-model.md    # Loaded when task mentions "threat", "attack"
+├── code-audit.md      # Loaded when task mentions "audit", "review"
+└── vuln-scan.md       # Loaded when task mentions "vulnerability", "CVE"
+```
+
+Skill files use this format:
+
+```markdown
+---
+name: threat-model
+description: Systematic threat modeling for a system
+triggers: [threat, attack, surface, adversary]
+priority: 5
+---
+
+Instructions for the agent when this skill is activated...
+```
+
+Skills are read-only at runtime — agents cannot modify their own skill files. Content integrity is verified via SHA-256 hash before injection.
+
 ## Agent Lifecycle
 
 ### Creation
