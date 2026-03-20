@@ -43,6 +43,7 @@ export default defineConfig({
 				{
 					label: 'Design',
 					items: [
+						{ label: 'The Zen of Archon', slug: 'design/zen' },
 						{ label: 'Philosophy', slug: 'design/philosophy' },
 						{ label: 'Decisions (ADRs)', slug: 'design/decisions' },
 					],
