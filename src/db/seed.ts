@@ -40,7 +40,7 @@ async function seed(): Promise<void> {
     ])
     .onConflictDoNothing();
 
-  // --- CEO Agent ---
+  // --- CEO Agent (bootstrap — needs to exist for admin permissions) ---
   await db
     .insert(agents)
     .values({
@@ -61,73 +61,6 @@ async function seed(): Promise<void> {
     })
     .onConflictDoNothing();
 
-  // --- Demo agents for testing ---
-  await db
-    .insert(agents)
-    .values([
-      {
-        id: "alice",
-        displayName: "Alice",
-        workspacePath: "~/.archon/agents/alice",
-      },
-      {
-        id: "bob",
-        displayName: "Bob",
-        workspacePath: "~/.archon/agents/bob",
-      },
-    ])
-    .onConflictDoNothing();
-
-  // --- Demo agents → Engineering department ---
-  await db
-    .insert(agentDepartments)
-    .values([
-      { agentId: "alice", departmentId: "engineering", roleId: "lead_dev" },
-      { agentId: "bob", departmentId: "engineering", roleId: "lead_dev" },
-    ])
-    .onConflictDoNothing();
-
-  // --- Review agents for testing ---
-  await db
-    .insert(agents)
-    .values([
-      {
-        id: "code-reviewer",
-        displayName: "Code Reviewer",
-        workspacePath: "~/.archon/agents/code-reviewer",
-        modelConfig: { provider: "cli-claude", model: "sonnet" },
-      },
-      {
-        id: "ux-reviewer",
-        displayName: "UX Reviewer",
-        workspacePath: "~/.archon/agents/ux-reviewer",
-        modelConfig: { provider: "cli-claude", model: "sonnet" },
-      },
-      {
-        id: "tech-lead",
-        displayName: "Tech Lead",
-        workspacePath: "~/.archon/agents/tech-lead",
-        modelConfig: { provider: "cli-claude", model: "sonnet" },
-      },
-      {
-        id: "sherlock",
-        displayName: "Sherlock",
-        workspacePath: "~/.archon/agents/sherlock",
-        modelConfig: { provider: "cli-claude", model: "sonnet" },
-      },
-    ])
-    .onConflictDoNothing();
-
-  await db
-    .insert(agentDepartments)
-    .values([
-      { agentId: "code-reviewer", departmentId: "engineering", roleId: "lead_dev" },
-      { agentId: "ux-reviewer", departmentId: "engineering", roleId: "lead_dev" },
-      { agentId: "tech-lead", departmentId: "engineering", roleId: "lead_dev" },
-      { agentId: "sherlock", departmentId: "engineering", roleId: "lead_dev" },
-    ])
-    .onConflictDoNothing();
-
   // --- CEO admin permissions ---
   const existingPerms = await db.query.permissions.findFirst({
     where: (p, { eq }) => eq(p.agentId, "ceo"),
@@ -139,6 +72,9 @@ async function seed(): Promise<void> {
       { agentId: "ceo", resource: "meeting:*", action: "admin" },
     ]);
   }
+
+  // Other agents are registered via CLI:
+  //   npm run archon -- agent add ~/.archon/agents/sherlock ~/.archon/agents/tech-lead ...
 
   logger.info("Seed complete");
 }
