@@ -36,7 +36,7 @@ function printUsage(): void {
 Archon CLI — Agent Management
 
 Usage:
-  archon agent add <path> [options]   Register an agent from a workspace directory
+  archon agent add <path> [path2...]  Register agent(s) from workspace directories
   archon agent list                   List all registered agents
 
 Options for 'agent add':
@@ -94,18 +94,25 @@ function parseIdentityFile(path: string): ParsedIdentity | null {
 // --- Commands ---
 
 async function agentAdd(): Promise<void> {
-  const pathArg = args[2];
-  if (!pathArg) {
-    console.error("Error: Missing <path> argument");
-    console.error("Usage: archon agent add <path>");
+  // Collect all positional paths (everything after "agent add" that isn't a flag)
+  const pathArgs = args.slice(2).filter((a) => !a.startsWith("--"));
+  if (pathArgs.length === 0) {
+    console.error("Error: Missing <path> argument(s)");
+    console.error("Usage: archon agent add <path> [path2] [path3] ...");
     process.exit(1);
   }
 
+  for (const pathArg of pathArgs) {
+    await addSingleAgent(pathArg);
+  }
+}
+
+async function addSingleAgent(pathArg: string): Promise<void> {
   // 1. Validate and canonicalize path
   const rawPath = pathArg.replace(/^~/, process.env.HOME ?? "~");
   if (!existsSync(rawPath)) {
     console.error(`Error: Path not found: ${pathArg}`);
-    process.exit(1);
+    return;
   }
 
   let workspacePath: string;
@@ -113,7 +120,7 @@ async function agentAdd(): Promise<void> {
     workspacePath = realpathSync(rawPath);
   } catch {
     console.error(`Error: Cannot resolve path: ${pathArg}`);
-    process.exit(1);
+    return;
   }
 
   // 2. Verify path is within a reasonable workspace root (prevent traversal)
@@ -122,7 +129,7 @@ async function agentAdd(): Promise<void> {
   if (!workspacePath.startsWith(archonAgentsDir) && !workspacePath.startsWith(repoAgentsDir)) {
     console.error(`Error: Workspace path must be within ~/.archon/agents/ or ./agents/`);
     console.error(`  Resolved path: ${workspacePath}`);
-    process.exit(1);
+    return;
   }
 
   // 3. Check for identity files
@@ -132,19 +139,19 @@ async function agentAdd(): Promise<void> {
   if (!hasIdentity && !hasSoul) {
     console.error(`Error: No IDENTITY.md or SOUL.md found in ${pathArg}`);
     console.error("An agent workspace must contain at least one identity file.");
-    process.exit(1);
+    return;
   }
 
-  // 3. Parse agent identity
+  // 4. Parse agent identity
   let name: string;
   let displayName: string;
 
   if (hasIdentity) {
     const parsed = parseIdentityFile(resolve(workspacePath, "IDENTITY.md"));
     if (!parsed) {
-      console.error("Error: Could not parse agent name from IDENTITY.md");
+      console.error(`Error: Could not parse agent name from IDENTITY.md for ${pathArg}`);
       console.error('Expected format: - **Name**: Agent Name');
-      process.exit(1);
+      return;
     }
     name = parsed.name;
     displayName = parsed.displayName;
@@ -154,41 +161,41 @@ async function agentAdd(): Promise<void> {
     displayName = basename(workspacePath);
   }
 
-  // 4. Validate agent ID
+  // 5. Validate agent ID
   if (!/^[a-z0-9_-]+$/.test(name)) {
     console.error(`Error: Invalid agent ID "${name}" — must be lowercase alphanumeric with hyphens/underscores`);
-    process.exit(1);
+    return;
   }
 
-  // 5. Check for duplicate
+  // 6. Check for duplicate
   const existing = await db.query.agents.findFirst({
     where: eq(agents.id, name),
   });
 
   if (existing) {
-    console.error(`Error: Agent "${name}" already exists. Remove the record manually or wait for 'agent update' (see https://github.com/LeviathanST/archon/issues/22).`);
-    process.exit(1);
+    console.error(`Error: Agent "${name}" already exists. Skipping.`);
+    return;
   }
 
-  // 6. Build model config
+  // 7. Build model config
   const provider = getFlag("--provider", "cli-claude");
   const model = getFlag("--model");
   const modelConfig: Record<string, unknown> = { provider };
   if (model) modelConfig.model = model;
 
-  // 7. Validate department/role flags
+  // 8. Validate department/role flags
   const departmentId = getFlag("--department");
   const roleId = getFlag("--role");
   if (departmentId && !roleId) {
     console.error("Error: --department requires --role to be specified as well.");
-    process.exit(1);
+    return;
   }
   if (roleId && !departmentId) {
     console.error("Error: --role requires --department to be specified as well.");
-    process.exit(1);
+    return;
   }
 
-  // 8. Insert into database + generate card in a transaction
+  // 9. Insert into database + generate card in a transaction
   try {
     await db.transaction(async (tx) => {
       const [agent] = await tx
@@ -220,8 +227,7 @@ async function agentAdd(): Promise<void> {
       console.log(`  Provider:  ${provider}${model ? ` (${model})` : ""}`);
     });
   } catch (err) {
-    console.error(`Error: Failed to register agent — ${String(err)}`);
-    process.exit(1);
+    console.error(`Error: Failed to register agent "${pathArg}" — ${String(err)}`);
   }
 }
 
