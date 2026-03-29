@@ -2,7 +2,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 function notImplemented(toolName: string): CallToolResult {
   return {
-    isError: false,
+    isError: true,
     content: [
       {
         type: 'text',

@@ -4,6 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadIdentity } from './tools/identity.js';
 import { contextGet, meetingJoin, statusReport } from './tools/stubs.js';
+import { connect, shutdown } from './bridge.js';
 
 const agentId = process.env.ARCHON_AGENT_ID;
 if (!agentId) {
@@ -50,7 +51,20 @@ server.tool(
   () => statusReport(),
 );
 
+// Clean shutdown on process exit
+async function handleShutdown(): Promise<void> {
+  await shutdown();
+  process.exit(0);
+}
+
+process.on('SIGINT', handleShutdown);
+process.on('SIGTERM', handleShutdown);
+
 async function main() {
+  // Connect the neural memory bridge before accepting any tool calls.
+  // Fail fast: if nmem-mcp won't spawn, the agent cannot function.
+  await connect(server);
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
