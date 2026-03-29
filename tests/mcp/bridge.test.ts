@@ -87,6 +87,17 @@ describe("neural memory bridge", () => {
         "Retrieve memories",
         expect.any(Function),
       );
+
+      // Verify the registered handler actually forwards to callTool
+      const expected = { content: [{ type: "text", text: "ok" }], isError: false };
+      mocks.mockCallTool.mockResolvedValue(expected);
+      const handler = mockServerTool.mock.calls[0][2];
+      const result = await handler({ content: "test" });
+      expect(mocks.mockCallTool).toHaveBeenCalledWith({
+        name: "nmem_remember",
+        arguments: { content: "test" },
+      });
+      expect(result).toEqual(expected);
     });
 
     it("throws with 'health check failed' when listTools() rejects", async () => {
