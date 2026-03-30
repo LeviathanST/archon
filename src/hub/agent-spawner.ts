@@ -8,8 +8,7 @@
  * Runner selection (env var ARCHON_RUNNER_PATH):
  *   - When set: spawns the archon-agent runner at that path.
  *     Command: npx tsx <ARCHON_RUNNER_PATH> --agent <id> --meeting <id> --hub <url> --provider <p>
- *     Default value for this env var (for reference):
- *       /home/leviathanst/archon-agent/scripts/runner.ts
+ *     Example: ARCHON_RUNNER_PATH=<archon-agent-dir>/scripts/runner.ts
  *   - When unset: falls back to the legacy scripts/agent.ts runner (backwards compatible).
  *     Command: npx tsx scripts/agent.ts --id <id> --provider <p> --hub <url>
  */
@@ -143,7 +142,7 @@ export class AgentSpawner {
 
     // Determine which runner to use.
     // ARCHON_RUNNER_PATH: path to archon-agent runner script.
-    //   Set to use the new archon-agent runner (e.g. /home/leviathanst/archon-agent/scripts/runner.ts).
+    //   Set to use the new archon-agent runner (e.g. <archon-agent-dir>/scripts/runner.ts).
     //   Unset to fall back to the legacy scripts/agent.ts runner.
     const archonRunnerPath = process.env.ARCHON_RUNNER_PATH;
 
@@ -192,6 +191,8 @@ export class AgentSpawner {
         LANG: process.env.LANG,
       };
       if (config.apiKey) env.AGENT_API_KEY = config.apiKey;
+      if (archonRunnerPath && provider === "openai" && config.baseUrl) env.OPENAI_BASE_URL = config.baseUrl;
+      if (archonRunnerPath && provider === "openai" && process.env.OPENAI_API_KEY) env.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
       const proc = spawn(tsxPath, args, {
         stdio: ["ignore", "pipe", "pipe"],
