@@ -213,3 +213,4 @@ Error responses use a fixed set of codes with static messages. The hub never inc
 | `NOT_YOUR_TURN` | Action not available in current phase | Not your turn to speak |
 | `ALREADY_IN_MEETING` | Already in a meeting | Agent already has an active session |
 | `INTERNAL_ERROR` | Internal error | Server error |
+| `AGENT_PROCESS_ERROR` | Agent process terminated unexpectedly | Spawned agent process crashed |

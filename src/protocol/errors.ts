@@ -11,6 +11,7 @@ export const ErrorCode = {
   NOT_YOUR_TURN: "NOT_YOUR_TURN",
   ALREADY_IN_MEETING: "ALREADY_IN_MEETING",
   INTERNAL_ERROR: "INTERNAL_ERROR",
+  AGENT_PROCESS_ERROR: "AGENT_PROCESS_ERROR",
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -29,6 +30,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOT_YOUR_TURN: "Action not available in current phase",
   ALREADY_IN_MEETING: "Already in a meeting",
   INTERNAL_ERROR: "Internal error",
+  AGENT_PROCESS_ERROR: "Agent process terminated unexpectedly",
 };
 
 export interface ErrorMessage {

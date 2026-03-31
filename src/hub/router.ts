@@ -1013,11 +1013,7 @@ export class Router {
 
     // Unexpected crash — notify all connected clients
     logger.warn({ agentId, code, signal }, "Agent process crashed");
-    this.sessions.broadcast({
-      type: "agent.process_error",
-      agentId,
-      reason: code !== null ? `Process exited with code ${code}` : `Process killed by ${signal}`,
-    });
+    this.sessions.broadcast(createError("AGENT_PROCESS_ERROR"));
     this.broadcastDirectoryUpdated();
   }
 
