@@ -15,12 +15,32 @@ export const ErrorCode = {
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 
+/** Static error messages — the ONLY strings ever sent to clients. */
+export const ERROR_MESSAGES: Record<ErrorCode, string> = {
+  AUTH_REQUIRED: "Authentication required",
+  AUTH_FAILED: "Authentication failed",
+  INVALID_MESSAGE: "Invalid message format",
+  UNKNOWN_TYPE: "Unsupported message type",
+  AGENT_NOT_FOUND: "Agent not found",
+  PERMISSION_DENIED: "Permission denied",
+  MEETING_NOT_FOUND: "Meeting not found",
+  MEETING_FULL: "Meeting is full",
+  NOT_IN_MEETING: "Not in a meeting",
+  NOT_YOUR_TURN: "Action not available in current phase",
+  ALREADY_IN_MEETING: "Already in a meeting",
+  INTERNAL_ERROR: "Internal error",
+};
+
 export interface ErrorMessage {
   type: "error";
   code: ErrorCode;
   message: string;
 }
 
-export function createError(code: ErrorCode, message: string): ErrorMessage {
-  return { type: "error", code, message };
+/**
+ * Create a client-facing error. Message is derived solely from ERROR_MESSAGES —
+ * no freeform strings ever reach the wire.
+ */
+export function createError(code: ErrorCode): ErrorMessage {
+  return { type: "error", code, message: ERROR_MESSAGES[code] };
 }
