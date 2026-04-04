@@ -17,6 +17,7 @@ import {
 import { listMeetings, getMeetingTranscript } from "../meeting/meeting-queries.js";
 import { getLLMConfig, setLLMConfig, isLLMAvailable } from "../meeting/summarizer.js";
 import { AgentSpawner } from "./agent-spawner.js";
+import { createTask, listTasks, getTask, updateTask } from "../tasks/task-crud.js";
 import { logger } from "../utils/logger.js";
 
 export class Router {
@@ -221,6 +222,22 @@ export class Router {
 
       case "config.set":
         await this.handleConfigSet(agentId, message.key, message.value);
+        break;
+
+      case "task.create":
+        await this.handleTaskCreate(agentId, message);
+        break;
+
+      case "task.list":
+        await this.handleTaskList(agentId);
+        break;
+
+      case "task.get":
+        await this.handleTaskGet(agentId, message.taskId);
+        break;
+
+      case "task.update":
+        await this.handleTaskUpdate(agentId, message);
         break;
 
       default:
@@ -1057,6 +1074,65 @@ export class Router {
   /** Kill all spawned agent processes (called during shutdown). */
   killAllAgents(): void {
     this.spawner.killAll();
+  }
+
+
+  // --- Task CRUD ---
+
+  private async handleTaskCreate(
+    agentId: string,
+    msg: { title: string; description?: string; assignedTo?: string; meetingId?: string }
+  ): Promise<void> {
+    const result = await createTask(agentId, {
+      title: msg.title,
+      description: msg.description,
+      assignedTo: msg.assignedTo,
+      meetingId: msg.meetingId,
+    });
+
+    if (!result.ok) {
+      const code = result.code === "SERVER" ? ErrorCode.INTERNAL_ERROR : ErrorCode.PERMISSION_DENIED;
+      this.sessions.send(agentId, createError(code, result.error));
+      return;
+    }
+
+    this.sessions.send(agentId, { type: 'task.created', task: result.data });
+  }
+
+  private async handleTaskList(agentId: string): Promise<void> {
+    const result = await listTasks(agentId);
+    if (!result.ok) return;
+    this.sessions.send(agentId, { type: 'task.list.result', tasks: result.data.tasks, total: result.data.total });
+  }
+
+  private async handleTaskGet(agentId: string, taskId: string): Promise<void> {
+    const result = await getTask(agentId, taskId);
+
+    if (!result.ok) {
+      const code = result.code === "SERVER" ? ErrorCode.INTERNAL_ERROR : ErrorCode.PERMISSION_DENIED;
+      this.sessions.send(agentId, createError(code, result.error));
+      return;
+    }
+
+    this.sessions.send(agentId, { type: 'task.get.result', task: result.data });
+  }
+
+  private async handleTaskUpdate(
+    agentId: string,
+    msg: { taskId: string; status?: 'pending' | 'in_progress' | 'done' | 'failed'; result?: string }
+  ): Promise<void> {
+    const updateResult = await updateTask(agentId, msg.taskId, {
+      status: msg.status,
+      result: msg.result,
+    });
+
+    if (!updateResult.ok) {
+      const code = updateResult.code === "SERVER" ? ErrorCode.INTERNAL_ERROR : ErrorCode.PERMISSION_DENIED;
+      this.sessions.send(agentId, createError(code, updateResult.error));
+      return;
+    }
+
+    this.sessions.send(agentId, { type: 'task.updated', task: updateResult.data });
   }
 
   // --- Broadcast helpers ---
