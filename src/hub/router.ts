@@ -1077,13 +1077,20 @@ export class Router {
 
   private async handleTaskCreate(
     agentId: string,
-    msg: { title: string; description?: string; assignedTo?: string; meetingId?: string }
+    msg: {
+      title: string;
+      description?: string;
+      assignedTo?: string;
+      meetingId?: string;
+      taskMetadata?: import("../tasks/task-metadata.js").TaskMetadata;
+    }
   ): Promise<void> {
     const result = await createTask(agentId, {
       title: msg.title,
       description: msg.description,
       assignedTo: msg.assignedTo,
       meetingId: msg.meetingId,
+      taskMetadata: msg.taskMetadata,
     });
 
     if (!result.ok) {
