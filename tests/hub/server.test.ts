@@ -1,16 +1,45 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { WebSocket } from "ws";
-import { eq } from "drizzle-orm";
+import { eq, inArray, or } from "drizzle-orm";
 import { HubServer } from "../../src/hub/server.js";
 import { db, closeConnection } from "../../src/db/connection.js";
-import { agents } from "../../src/db/schema.js";
+import { agents, meetingMessages, meetingParticipants, meetings } from "../../src/db/schema.js";
 import { logger } from "../../src/utils/logger.js";
 
 const TEST_PORT = 9599;
 const WS_URL = `ws://localhost:${TEST_PORT}`;
+const TEST_AGENT_ID = "test-agent";
+const TEST_INVITEE_ID = "test-agent-2";
+const DISCONNECT_GRACE_MS = 200;
+const TEST_AGENT_IDS = [TEST_AGENT_ID, TEST_INVITEE_ID];
 
 let hub: HubServer;
 const openSockets: WebSocket[] = [];
+
+async function cleanupTestMeetings(): Promise<void> {
+  const meetingRows = await db.query.meetings.findMany({
+    columns: { id: true },
+    where: or(
+      eq(meetings.initiatorId, TEST_AGENT_ID),
+      inArray(
+        meetings.id,
+        db
+          .select({ meetingId: meetingParticipants.meetingId })
+          .from(meetingParticipants)
+          .where(inArray(meetingParticipants.agentId, TEST_AGENT_IDS)),
+      ),
+    ),
+  });
+  const meetingIds = meetingRows.map((row) => row.id);
+
+  if (meetingIds.length > 0) {
+    await db.delete(meetingMessages).where(inArray(meetingMessages.meetingId, meetingIds));
+    await db.delete(meetingParticipants).where(inArray(meetingParticipants.meetingId, meetingIds));
+    await db.delete(meetings).where(inArray(meetings.id, meetingIds));
+  }
+
+  await db.delete(meetingParticipants).where(inArray(meetingParticipants.agentId, TEST_AGENT_IDS));
+}
 
 function connect(): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
@@ -34,19 +63,52 @@ function waitForMessage(ws: WebSocket): Promise<unknown> {
   });
 }
 
+function waitForMessageType(
+  ws: WebSocket,
+  type: string,
+  timeoutMs = 2_000,
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.off("message", onMessage);
+      reject(new Error(`Timed out waiting for ${type}`));
+    }, timeoutMs);
+
+    const onMessage = (raw: Buffer) => {
+      const message = JSON.parse(raw.toString()) as Record<string, unknown>;
+      if (message.type !== type) return;
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      resolve(message);
+    };
+
+    ws.on("message", onMessage);
+  });
+}
+
 beforeAll(async () => {
-  // Ensure test agent exists in DB
+  // Ensure test agents exist in DB
   await db
     .insert(agents)
     .values({
-      id: "test-agent",
+      id: TEST_AGENT_ID,
       displayName: "Test Agent",
       workspacePath: "~/.archon/agents/test-agent",
       status: "active",
     })
     .onConflictDoNothing();
 
-  hub = new HubServer();
+  await db
+    .insert(agents)
+    .values({
+      id: TEST_INVITEE_ID,
+      displayName: "Test Agent 2",
+      workspacePath: "~/.archon/agents/test-agent-2",
+      status: "active",
+    })
+    .onConflictDoNothing();
+
+  hub = new HubServer({ disconnectGraceMs: DISCONNECT_GRACE_MS });
   await hub.start(TEST_PORT);
 });
 
@@ -61,9 +123,12 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  await hub.stop();
+  if (hub) {
+    await hub.stop();
+  }
   // Clean up test data
-  await db.delete(agents).where(eq(agents.id, "test-agent"));
+  await cleanupTestMeetings();
+  await db.delete(agents).where(inArray(agents.id, TEST_AGENT_IDS));
   await closeConnection();
 });
 
@@ -326,5 +391,82 @@ describe("HubServer", () => {
 
       // After close event fires, session is removed entirely
       expect(sessions.isOnline("test-agent")).toBe(false);
+    });
+
+    it("cancels an active meeting after heartbeat zombie eviction and clears meeting state", async () => {
+      const initiator = await connect();
+      const invitee = await connect();
+
+      await sendAndReceive(initiator, {
+        type: "auth",
+        agentId: TEST_AGENT_ID,
+        token: TEST_AGENT_ID,
+      });
+      await sendAndReceive(invitee, {
+        type: "auth",
+        agentId: TEST_INVITEE_ID,
+        token: TEST_INVITEE_ID,
+      });
+
+      const invitePromise = waitForMessageType(invitee, "meeting.invite");
+      const created = await sendAndReceive(initiator, {
+        type: "meeting.create",
+        title: "Heartbeat Cleanup Regression",
+        invitees: [TEST_INVITEE_ID],
+      }) as { meetingId: string };
+      const invite = await invitePromise;
+      const meetingId = created.meetingId;
+
+      expect(invite).toMatchObject({
+        type: "meeting.invite",
+        meetingId,
+      });
+
+      await sendAndReceive(invitee, {
+        type: "meeting.join",
+        meetingId,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const sessions = hub.getSessionManager();
+      expect(hub.getActiveMeetingsCount()).toBe(1);
+      expect(sessions.get(TEST_AGENT_ID)?.currentMeetingId).toBe(meetingId);
+      expect(sessions.get(TEST_INVITEE_ID)?.currentMeetingId).toBe(meetingId);
+
+      const cancelledPromise = waitForMessageType(invitee, "meeting.cancelled");
+
+      const zombie = sessions.get(TEST_AGENT_ID);
+      expect(zombie).toBeDefined();
+      zombie!.isAlive = false;
+      hub.tickHeartbeat();
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(sessions.get(TEST_AGENT_ID)).toBeUndefined();
+      expect(hub.getActiveMeetingsCount()).toBe(1);
+
+      const cancelled = await cancelledPromise;
+      expect(cancelled).toMatchObject({
+        type: "meeting.cancelled",
+        meetingId,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, DISCONNECT_GRACE_MS + 50));
+
+      expect(hub.getActiveMeetingsCount()).toBe(0);
+      expect(sessions.get(TEST_INVITEE_ID)?.currentMeetingId).toBeNull();
+
+      const reauth = await connect();
+      const authReply = await sendAndReceive(reauth, {
+        type: "auth",
+        agentId: TEST_AGENT_ID,
+        token: TEST_AGENT_ID,
+      });
+
+      expect(authReply).toMatchObject({
+        type: "auth.ok",
+        pendingInvites: [],
+        activeMeetings: [],
+      });
     });
   });
