@@ -23,12 +23,22 @@ import { logger } from "../utils/logger.js";
 export class Router {
   private activeMeetings = new Map<string, MeetingRoom>();
   private spawner: AgentSpawner;
+  private disconnectCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private shuttingDown = false;
+  // CALIBRATION: 5s reconnect window keeps brief socket churn from killing a
+  // meeting, while still clearing abandoned meeting state quickly enough to
+  // prevent stale homes and controls from lingering in the UI.
+  private readonly disconnectGraceMs: number;
 
-  constructor(private sessions: SessionManager) {
+  constructor(
+    private sessions: SessionManager,
+    options: { disconnectGraceMs?: number } = {},
+  ) {
     const wsPort = parseInt(process.env.WS_PORT ?? "9500", 10);
     this.spawner = new AgentSpawner(`ws://127.0.0.1:${wsPort}`, {
       onProcessExit: (agentId, code, signal) => this.handleAgentProcessExit(agentId, code, signal),
     });
+    this.disconnectGraceMs = options.disconnectGraceMs ?? 5_000;
   }
 
   async handleRaw(socket: WebSocket, raw: string): Promise<void> {
@@ -303,6 +313,8 @@ export class Router {
       socket.close(4002, "Already in meeting");
       return;
     }
+
+    this.clearDisconnectCleanup(agentId);
 
     const agentCard = await getAgentCard(agentId);
 
@@ -1021,9 +1033,7 @@ export class Router {
   // --- Agent process lifecycle ---
 
   private handleAgentProcessExit(agentId: string, code: number | null, signal: string | null): void {
-    // Always remove the session — the WS close event may not fire synchronously
-    // after process exit, leaving isOnline() returning true for a dead agent.
-    this.sessions.remove(agentId);
+    this.handleAgentDisconnected(agentId);
 
     // Normal exit (code 0 or SIGINT from despawn) — don't notify
     if (code === 0 || signal === "SIGINT") return;
@@ -1071,6 +1081,7 @@ export class Router {
 
     if (room) {
       for (const participantId of room.getParticipants()) {
+        this.clearDisconnectCleanup(participantId);
         this.sessions.clearMeeting(participantId);
       }
     }
@@ -1106,6 +1117,23 @@ export class Router {
     this.spawner.killAll();
   }
 
+  async shutdown(): Promise<void> {
+    this.shuttingDown = true;
+
+    for (const timer of this.disconnectCleanupTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.disconnectCleanupTimers.clear();
+
+    const meetingIds = [...this.activeMeetings.keys()];
+    for (const meetingId of meetingIds) {
+      const room = this.activeMeetings.get(meetingId);
+      if (!room) continue;
+      await room.cancel("Cancelled during hub shutdown");
+    }
+
+    this.killAllAgents();
+  }
 
   // --- Task CRUD ---
 
@@ -1190,7 +1218,61 @@ export class Router {
     this.sessions.broadcast({ type: "directory.updated" });
   }
 
+  handleSocketClosed(socket: WebSocket): void {
+    const agentId = this.getAgentIdForSocket(socket);
+    if (!agentId) return;
+    this.handleAgentDisconnected(agentId);
+  }
+
   // --- Helpers ---
+
+  private handleAgentDisconnected(agentId: string): void {
+    const session = this.sessions.get(agentId);
+    const meetingId = session?.currentMeetingId;
+
+    this.sessions.remove(agentId);
+    this.broadcastDirectoryUpdated();
+
+    if (!meetingId || this.shuttingDown) return;
+    this.scheduleDisconnectCleanup(agentId, meetingId);
+  }
+
+  private scheduleDisconnectCleanup(agentId: string, meetingId: string): void {
+    this.clearDisconnectCleanup(agentId);
+
+    const timer = setTimeout(() => {
+      this.runDisconnectCleanup(agentId, meetingId).catch((err) => {
+        logger.error({ err, agentId, meetingId }, "Failed to reconcile disconnected meeting participant");
+      });
+    }, this.disconnectGraceMs);
+
+    timer.unref?.();
+    this.disconnectCleanupTimers.set(agentId, timer);
+  }
+
+  private clearDisconnectCleanup(agentId: string): void {
+    const timer = this.disconnectCleanupTimers.get(agentId);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.disconnectCleanupTimers.delete(agentId);
+  }
+
+  private async runDisconnectCleanup(agentId: string, meetingId: string): Promise<void> {
+    this.disconnectCleanupTimers.delete(agentId);
+
+    if (this.shuttingDown) return;
+
+    const session = this.sessions.get(agentId);
+    if (session?.currentMeetingId === meetingId) {
+      logger.info({ agentId, meetingId }, "Agent reconnected before meeting cleanup fired");
+      return;
+    }
+
+    const room = this.activeMeetings.get(meetingId);
+    if (!room || room.getStatus() !== "active") return;
+
+    await room.cancel(`Cancelled after ${agentId} disconnected and did not return`);
+  }
 
   private getMeetingOrError(agentId: string, meetingId: string): MeetingRoom | null {
     const room = this.activeMeetings.get(meetingId);

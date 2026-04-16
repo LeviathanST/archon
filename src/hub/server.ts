@@ -20,17 +20,25 @@ export interface HubServerOptions {
    * Production default: 30_000ms.
    */
   heartbeatIntervalMs?: number;
+  /**
+   * Override the reconnect grace window before a disconnected meeting
+   * participant triggers meeting cleanup. Only set this in tests.
+   */
+  disconnectGraceMs?: number;
 }
 
 export class HubServer {
   private wss: WebSocketServer | null = null;
   private sessions = new SessionManager();
-  private router = new Router(this.sessions);
+  private router: Router;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private readonly heartbeatIntervalMs: number;
 
   constructor(options: HubServerOptions = {}) {
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.router = new Router(this.sessions, {
+      disconnectGraceMs: options.disconnectGraceMs,
+    });
   }
 
   async start(port: number, host?: string): Promise<void> {
@@ -59,15 +67,7 @@ export class HubServer {
       });
 
       socket.on("close", () => {
-        // Find and clean up the session for this socket
-        for (const session of this.sessions.getAll()) {
-          if (session.socket === socket) {
-            const { agentId } = session;
-            this.sessions.remove(agentId);
-            logger.info({ agentId }, "Agent disconnected");
-            break;
-          }
-        }
+        this.router.handleSocketClosed(socket);
       });
 
       socket.on("error", (error) => {
@@ -104,9 +104,12 @@ export class HubServer {
   tickHeartbeat(): void {
     for (const session of this.sessions.getAll()) {
       if (!session.isAlive) {
-        logger.warn({ agentId: session.agentId }, "Zombie socket detected — evicting session");
-        session.socket.terminate();
-        this.sessions.remove(session.agentId);
+        logger.warn({ agentId: session.agentId }, "Zombie socket detected — terminating socket for disconnect cleanup");
+        try {
+          session.socket.terminate();
+        } finally {
+          this.router.handleSocketClosed(session.socket);
+        }
         continue;
       }
 
@@ -127,8 +130,7 @@ export class HubServer {
       this.heartbeatTimer = null;
     }
 
-    // Kill all spawned agent processes
-    this.router.killAllAgents();
+    await this.router.shutdown();
 
     // Close all connections
     for (const session of this.sessions.getAll()) {
@@ -145,5 +147,9 @@ export class HubServer {
 
   getSessionManager(): SessionManager {
     return this.sessions;
+  }
+
+  getActiveMeetingsCount(): number {
+    return this.router.getActiveMeetings().size;
   }
 }
