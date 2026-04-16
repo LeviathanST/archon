@@ -2,7 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, closeConnection } from "../../src/db/connection.js";
 import { agents, meetings, meetingParticipants, meetingMessages } from "../../src/db/schema.js";
-import { listMeetings, getMeetingTranscript } from "../../src/meeting/meeting-queries.js";
+import {
+  listMeetings,
+  getMeetingTranscript,
+  assertStructuralProvenance,
+} from "../../src/meeting/meeting-queries.js";
 
 const INITIATOR = "mq-test-initiator";
 const PARTICIPANT = "mq-test-participant";
@@ -47,9 +51,36 @@ beforeAll(async () => {
 
   // Add messages
   await db.insert(meetingMessages).values([
-    { meetingId: MEETING_1, agentId: INITIATOR, phase: "present", content: "Let's discuss TypeScript migration", tokenCount: 10 },
-    { meetingId: MEETING_1, agentId: PARTICIPANT, phase: "discuss", content: "I think we should do it", tokenCount: 8 },
-    { meetingId: MEETING_1, agentId: INITIATOR, phase: "discuss", content: "Agreed, let's proceed", tokenCount: 6 },
+    {
+      meetingId: MEETING_1,
+      agentId: INITIATOR,
+      phase: "present",
+      content: "Let's discuss TypeScript migration",
+      speakerRole: "initiator",
+      authorityScope: "meeting:initiator",
+      contentType: "statement",
+      tokenCount: 10,
+    },
+    {
+      meetingId: MEETING_1,
+      agentId: PARTICIPANT,
+      phase: "discuss",
+      content: "I think we should do it",
+      speakerRole: "participant",
+      authorityScope: "phase:open_discussion",
+      contentType: "statement",
+      tokenCount: 8,
+    },
+    {
+      meetingId: MEETING_1,
+      agentId: INITIATOR,
+      phase: "discuss",
+      content: "Agreed, let's proceed",
+      speakerRole: "initiator",
+      authorityScope: "meeting:initiator",
+      contentType: "statement",
+      tokenCount: 6,
+    },
   ]);
 });
 
@@ -115,6 +146,24 @@ describe("Meeting Queries", () => {
       expect(result!.messages[1].displayName).toBe("Participant");
     });
 
+    it("should surface structural provenance fields in one hop", async () => {
+      const result = await getMeetingTranscript(MEETING_1);
+      expect(result!.messages[0]).toMatchObject({
+        agentId: INITIATOR,
+        speakerId: INITIATOR,
+        speakerRole: "initiator",
+        authorityScope: "meeting:initiator",
+        contentType: "statement",
+      });
+      expect(result!.messages[1]).toMatchObject({
+        agentId: PARTICIPANT,
+        speakerId: PARTICIPANT,
+        speakerRole: "participant",
+        authorityScope: "phase:open_discussion",
+        contentType: "statement",
+      });
+    });
+
     it("should include decisions and action items", async () => {
       const result = await getMeetingTranscript(MEETING_1);
       expect(result!.meeting.decisions).toHaveLength(1);
@@ -132,6 +181,22 @@ describe("Meeting Queries", () => {
       // IDs are serial, so should be ascending
       expect(ids[0]).toBeLessThan(ids[1]);
       expect(ids[1]).toBeLessThan(ids[2]);
+    });
+
+    it("should fail fast when structural provenance is flattened away", () => {
+      expect(() => assertStructuralProvenance({
+        id: 999,
+        agentId: INITIATOR,
+        speakerRole: null,
+        authorityScope: "meeting:initiator",
+        contentType: "statement",
+        displayName: "Initiator",
+        phase: "present",
+        content: "missing role",
+        tokenCount: 1,
+        relevance: null,
+        createdAt: new Date(),
+      })).toThrow(/speaker_role/);
     });
   });
 });
