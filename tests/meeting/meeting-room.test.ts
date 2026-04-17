@@ -356,6 +356,7 @@ describe("MeetingRoom", () => {
       "phase:assignments",
     ]);
     expect(rows.every((row) => row.agentId.length > 0)).toBe(true);
+    expect(rows.every((row) => row.provenanceKnown)).toBe(true);
   });
 
   it("should complete meeting and persist decisions", async () => {

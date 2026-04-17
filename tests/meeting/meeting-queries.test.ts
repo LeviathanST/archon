@@ -56,6 +56,7 @@ beforeAll(async () => {
       agentId: INITIATOR,
       phase: "present",
       content: "Let's discuss TypeScript migration",
+      provenanceKnown: true,
       speakerRole: "initiator",
       authorityScope: "meeting:initiator",
       contentType: "statement",
@@ -66,6 +67,7 @@ beforeAll(async () => {
       agentId: PARTICIPANT,
       phase: "discuss",
       content: "I think we should do it",
+      provenanceKnown: true,
       speakerRole: "participant",
       authorityScope: "phase:open_discussion",
       contentType: "statement",
@@ -76,10 +78,22 @@ beforeAll(async () => {
       agentId: INITIATOR,
       phase: "discuss",
       content: "Agreed, let's proceed",
+      provenanceKnown: true,
       speakerRole: "initiator",
       authorityScope: "meeting:initiator",
       contentType: "statement",
       tokenCount: 6,
+    },
+    {
+      meetingId: MEETING_2,
+      agentId: INITIATOR,
+      phase: "present",
+      content: "Legacy transcript row with unknown provenance",
+      provenanceKnown: false,
+      speakerRole: "participant",
+      authorityScope: "meeting:participant",
+      contentType: "statement",
+      tokenCount: 7,
     },
   ]);
 });
@@ -164,6 +178,19 @@ describe("Meeting Queries", () => {
       });
     });
 
+    it("should preserve legacy unknown provenance instead of inventing structure", async () => {
+      const result = await getMeetingTranscript(MEETING_2);
+      expect(result).not.toBeNull();
+      expect(result!.messages).toHaveLength(1);
+      expect(result!.messages[0]).toMatchObject({
+        agentId: INITIATOR,
+        speakerId: INITIATOR,
+        speakerRole: null,
+        authorityScope: null,
+        contentType: null,
+      });
+    });
+
     it("should include decisions and action items", async () => {
       const result = await getMeetingTranscript(MEETING_1);
       expect(result!.meeting.decisions).toHaveLength(1);
@@ -183,20 +210,21 @@ describe("Meeting Queries", () => {
       expect(ids[1]).toBeLessThan(ids[2]);
     });
 
-    it("should fail fast when structural provenance is flattened away", () => {
+    it("should keep speaker identity strict even when legacy provenance is unknown", () => {
       expect(() => assertStructuralProvenance({
         id: 999,
-        agentId: INITIATOR,
+        agentId: "",
+        provenanceKnown: false,
         speakerRole: null,
-        authorityScope: "meeting:initiator",
-        contentType: "statement",
+        authorityScope: null,
+        contentType: null,
         displayName: "Initiator",
         phase: "present",
-        content: "missing role",
+        content: "missing speaker",
         tokenCount: 1,
         relevance: null,
         createdAt: new Date(),
-      })).toThrow(/speaker_role/);
+      })).toThrow(/speaker_id/);
     });
   });
 });
