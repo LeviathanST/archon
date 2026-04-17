@@ -21,6 +21,7 @@ describe("review-meeting.sh — review target hardening", () => {
     expect(source).toContain("Review target:");
     expect(source).toContain("Target repo:");
     expect(source).toContain("Workspace path:");
+    expect(source).toContain("Current branch:");
     expect(source).toContain("Base ref:");
     expect(source).toContain("Head ref:");
   });

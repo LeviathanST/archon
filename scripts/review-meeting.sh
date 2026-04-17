@@ -263,6 +263,7 @@ $(if [ -n "$CHECK_RESULTS" ]; then echo -e "\nAutomated checks:\n${CHECK_RESULTS
 Review target:
 - Target repo: ${TARGET_REPO}
 - Workspace path: ${WORKTREE_ROOT}
+- Current branch: ${CURRENT_BRANCH}
 - Review mode: ${MODE}
 - Base ref: ${BASE_REF:-"(not applicable)"}
 - Head ref: ${HEAD_REF:-"(not applicable)"}
