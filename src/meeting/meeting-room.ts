@@ -816,6 +816,7 @@ export class MeetingRoom {
       agentId: event.agentId,
       phase: event.phase,
       content: event.content,
+      provenanceKnown: true,
       speakerRole: event.speakerRole,
       authorityScope: event.authorityScope,
       contentType: event.contentType,

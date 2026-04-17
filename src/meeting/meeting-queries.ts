@@ -27,9 +27,9 @@ export interface TranscriptEntry {
   id: number;
   agentId: string;
   speakerId: string;
-  speakerRole: string;
-  authorityScope: string;
-  contentType: string;
+  speakerRole: string | null;
+  authorityScope: string | null;
+  contentType: string | null;
   displayName: string;
   phase: string;
   content: string;
@@ -41,6 +41,7 @@ export interface TranscriptEntry {
 interface TranscriptRow {
   id: number;
   agentId: string;
+  provenanceKnown: boolean;
   speakerRole: string | null;
   authorityScope: string | null;
   contentType: string | null;
@@ -74,23 +75,18 @@ export function assertStructuralProvenance(row: TranscriptRow): TranscriptEntry 
   if (!row.agentId) {
     throw new Error(`Transcript row ${row.id} is missing speaker_id`);
   }
-  if (!row.speakerRole) {
-    throw new Error(`Transcript row ${row.id} is missing speaker_role`);
-  }
-  if (!row.authorityScope) {
-    throw new Error(`Transcript row ${row.id} is missing authority_scope`);
-  }
-  if (!row.contentType) {
-    throw new Error(`Transcript row ${row.id} is missing content_type`);
-  }
+
+  const speakerRole = row.provenanceKnown ? row.speakerRole : null;
+  const authorityScope = row.provenanceKnown ? row.authorityScope : null;
+  const contentType = row.provenanceKnown ? row.contentType : null;
 
   return {
     id: row.id,
     agentId: row.agentId,
     speakerId: row.agentId,
-    speakerRole: row.speakerRole,
-    authorityScope: row.authorityScope,
-    contentType: row.contentType,
+    speakerRole,
+    authorityScope,
+    contentType,
     displayName: row.displayName,
     phase: row.phase,
     content: row.content,
@@ -169,6 +165,7 @@ export async function getMeetingTranscript(meetingId: string): Promise<MeetingTr
     .select({
       id: meetingMessages.id,
       agentId: meetingMessages.agentId,
+      provenanceKnown: meetingMessages.provenanceKnown,
       speakerRole: meetingMessages.speakerRole,
       authorityScope: meetingMessages.authorityScope,
       contentType: meetingMessages.contentType,
